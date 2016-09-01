@@ -1,0 +1,121 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
+    <ProjectGuid>{31919B86-921F-4C36-A4F9-3A7BC37928A0}</ProjectGuid>
+    <OutputType>Library</OutputType>
+    <AppDesignerFolder>Properties</AppDesignerFolder>
+    <RootNamespace>GoodAI.TestingNodes</RootNamespace>
+    <AssemblyName>GoodAI.TestingNodes</AssemblyName>
+    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
+    <FileAlignment>512</FileAlignment>
+    <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\..\..\</SolutionDir>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugSymbols>true</DebugSymbols>
+    <DebugType>full</DebugType>
+    <Optimize>false</Optimize>
+    <OutputPath>bin\Debug\</OutputPath>
+    <DefineConstants>DEBUG;TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+    <DocumentationFile>conf\doc.xml</DocumentationFile>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <OutputPath>bin\Release\</OutputPath>
+    <DefineConstants>TRACE</DefineConstants>
+    <ErrorReport>prompt</ErrorReport>
+    <WarningLevel>4</WarningLevel>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="CudaBlas, Version=7.5.7.0, Culture=neutral, PublicKeyToken=539d54d12e99fedb, processorArchitecture=AMD64">
+      <HintPath>..\..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\CudaBlas.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="CudaFFT, Version=7.5.7.0, Culture=neutral, PublicKeyToken=f066edfa1acb2f23, processorArchitecture=AMD64">
+      <HintPath>..\..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\CudaFFT.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="CudaRand, Version=7.5.7.0, Culture=neutral, PublicKeyToken=fe981579f4e9a066, processorArchitecture=AMD64">
+      <HintPath>..\..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\CudaRand.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="CudaSolve, Version=7.5.7.0, Culture=neutral, processorArchitecture=AMD64">
+      <HintPath>..\..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\CudaSolve.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="CudaSparse, Version=7.5.7.0, Culture=neutral, PublicKeyToken=f65ee2ae6b331585, processorArchitecture=AMD64">
+      <HintPath>..\..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\CudaSparse.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="ManagedCuda, Version=7.5.7.0, Culture=neutral, PublicKeyToken=242d898828717aa0, processorArchitecture=MSIL">
+      <HintPath>..\..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\ManagedCuda.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="NPP, Version=7.5.7.0, Culture=neutral, processorArchitecture=AMD64">
+      <HintPath>..\..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\NPP.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="NVRTC, Version=7.5.7.0, Culture=neutral, processorArchitecture=AMD64">
+      <HintPath>..\..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\NVRTC.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="System" />
+    <Reference Include="System.Core" />
+    <Reference Include="System.Xml.Linq" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="System.Data" />
+    <Reference Include="System.Xml" />
+    <Reference Include="xunit.assert, Version=2.1.0.3179, Culture=neutral, PublicKeyToken=8d05b1bb7a6fdb6c, processorArchitecture=MSIL">
+      <HintPath>..\..\..\packages\xunit.assert.2.1.0\lib\portable-net45+win8+wp8+wpa81\xunit.assert.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="BrainUnitNode.cs" />
+    <Compile Include="BrainUnitNodeSelfTests.cs" />
+    <Compile Include="DynamicBlockNode.cs" />
+    <Compile Include="Properties\AssemblyInfo.cs" />
+    <Compile Include="Versioning\MyConversion.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\Libs\3rd\YAXLib\YAXLib\YAXLib.csproj">
+      <Project>{f1c4d174-c948-4d18-a125-f6855ef55683}</Project>
+      <Name>YAXLib</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\Platform\Core\Core.csproj">
+      <Project>{91324E64-9B84-4312-9E55-5A77DF07DA1B}</Project>
+      <Name>Core</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\..\..\Tests\BrainUnit\BrainUnit.csproj">
+      <Project>{6fcc90df-5301-4580-9b86-8a596cf9c9d9}</Project>
+      <Name>BrainUnit</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+    <None Include="post_build.cmd" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="conf\nodes.xml" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="conf\doc.xml" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <PropertyGroup>
+    <PostBuildEvent>"$(ProjectDir)post_build.cmd" "$(SolutionDir)" "$(ProjectDir)" "$(OutDir)" "$(Configuration)"</PostBuildEvent>
+  </PropertyGroup>
+  <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 
+       Other similar extension points exist, see Microsoft.Common.targets.
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+  -->
+</Project>

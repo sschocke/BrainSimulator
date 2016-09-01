@@ -1,19 +1,11 @@
+using GoodAI.Core;
 using GoodAI.Core.Memory;
-using GoodAI.Core.Nodes;
 using GoodAI.Core.Task;
-using GoodAI.Modules.Transforms;
 using GoodAI.Core.Utils;
 using ManagedCuda;
-using ManagedCuda.BasicTypes;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using ManagedCuda.CudaFFT;
 using YAXLib;
-using GoodAI.Core;
 
 namespace GoodAI.Modules.VSA
 {
@@ -346,6 +338,12 @@ namespace GoodAI.Modules.VSA
                             }
                         }
 
+                        if (maxXIdx == -1)
+                        {
+                            HandleIncorrectPosition();
+                            return;
+                        }
+
                         int bestNeighborId = 0;
                         if (maxXIdx > 0 && maxXIdx < Owner.X_POINTS - 1)
                         {
@@ -389,6 +387,12 @@ namespace GoodAI.Modules.VSA
                                 max = Owner.Distance.Host[i];
                                 maxYIdx = i - Owner.X_POINTS;
                             }
+                        }
+
+                        if (maxYIdx == -1)
+                        {
+                            HandleIncorrectPosition();
+                            return;
                         }
 
                         bestNeighborId = 0;
@@ -461,8 +465,14 @@ namespace GoodAI.Modules.VSA
                     }
                 }
             }
+
+            private void HandleIncorrectPosition()
+            {
+                MyLog.WARNING.WriteLine("Incorrect position detected");
+                Owner.Output.Fill(0);
+            }
         }
-        
+
         /*
         [MyBrowsable, Category("Grid")]
         [YAXSerializableField(DefaultValue = 10)]
@@ -588,7 +598,7 @@ namespace GoodAI.Modules.VSA
                     return;
 
                 for (int i = 0; i < symbols.Length; i++)
-                    m_dotKernel.Run(Owner.Temp, i, symbols[i], symbols[i], symbolSize);
+                    m_dotKernel.Run(Owner.Temp, i, symbols[i], symbols[i], symbolSize, 0);
 
                 Owner.Temp.SafeCopyToHost(0, symbols.Length);
 
@@ -604,7 +614,7 @@ namespace GoodAI.Modules.VSA
 
                 //for (int i = 0; i < symbols.Length; i++)
                 //{
-                //    m_dotKernel.Run(Owner.Temp, i, symbols[i], symbols[i], symbolSize);
+                //    m_dotKernel.Run(Owner.Temp, i, symbols[i], symbols[i], symbolSize, 0);
                 //    Owner.Temp.SafeCopyToHost(0, symbols.Length);
                 //}
             }
@@ -676,7 +686,7 @@ namespace GoodAI.Modules.VSA
                 m_kernel = MyKernelFactory.Instance.Kernel(nGPU, @"Common\CombineVectorsKernel", "CombineTwoVectorsKernel");
                 m_kernel.m_kernel.SetupExecution(Owner.SymbolSize);
 
-                m_decodeKernel = MyKernelFactory.Instance.Kernel(nGPU, @"VSA\RandomMapper", "DecodeSignal");
+                m_decodeKernel = MyKernelFactory.Instance.Kernel(nGPU, @"VSA\Mappers", "DecodeSignal");
                 m_decodeKernel.m_kernel.SetupExecution(Owner.Steps * 4 + 2);
             }
 

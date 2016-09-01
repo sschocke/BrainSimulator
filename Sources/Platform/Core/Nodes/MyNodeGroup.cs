@@ -1,12 +1,10 @@
 ﻿using GoodAI.Core.Memory;
-using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using GoodAI.Platform.Core.Utils;
 using YAXLib;
 
 namespace GoodAI.Core.Nodes
@@ -78,15 +76,18 @@ namespace GoodAI.Core.Nodes
         [ReadOnly(false)]
         public override int OutputBranches
         {
-            get { return GroupOutputNodes != null ? GroupOutputNodes.Length : 0; }
+            get { return base.OutputBranches; }
             set
             {
-                int nodesToCopy = Math.Min(value, OutputBranches);
+                // If GroupOutputNodes is set, it has preference over OutputBranches because of deserialization.
+                int nodesToCopy = Math.Min(value, GroupOutputNodes == null ? OutputBranches : GroupOutputNodes.Length);
+
+                base.OutputBranches = value;
 
                 MyOutput[] oldOutputs = GroupOutputNodes;
                 GroupOutputNodes = new MyOutput[value];
 
-                if (oldOutputs != null)
+                if (oldOutputs != null && oldOutputs.Length >= nodesToCopy)
                 {
                     Array.Copy(oldOutputs, GroupOutputNodes, nodesToCopy);
                 }
@@ -96,6 +97,16 @@ namespace GoodAI.Core.Nodes
                     InitOutputNodes();
                 }                
             }
+        }
+
+        public override void UpdateAfterDeserialization()
+        {
+            base.UpdateAfterDeserialization();
+
+            if (GroupOutputNodes == null)
+                return;
+
+            OutputBranches = GroupOutputNodes.Length;
         }
 
         public sealed override MyMemoryBlock<float> GetOutput(int index)
@@ -299,6 +310,24 @@ namespace GoodAI.Core.Nodes
             return null;
         }
 
+        public List<MyNode> GetChildNodesByName(String nodeName)
+        {
+            List<MyNode> nodes = new List<MyNode>();
+            foreach (MyNode child in Children)
+            {
+                if (child.Name == nodeName)
+                {
+                    nodes.Add(child);
+                }
+
+                if (child is MyNodeGroup)
+                {
+                    nodes.AddRange((child as MyNodeGroup).GetChildNodesByName(nodeName));
+                }
+            }
+            return nodes;
+        }
+
         public delegate void IteratorAction(MyNode node);
 
         public void Iterate(bool recursive, IteratorAction action)
@@ -335,6 +364,32 @@ namespace GoodAI.Core.Nodes
                     Iterate(childNode as MyNodeGroup, recursive, includeIONodes, action);
                 }
             }
-        }     
+        }
+
+        public override bool AcceptsConnection(MyNode fromNode, int fromIndex, int toIndex)
+        {
+            MyParentInput groupInput = GroupInputNodes[toIndex];
+
+            // Find all nodes connected to the input and check that they all accept the connection.
+            // If the input is not connected to anything, it'll accept all connections.
+            return Children.Union(GroupOutputNodes).All(child => child.InputConnections
+                .Where(connection => connection != null && connection.From == groupInput)
+                .WithIndex()
+                .All(connection => child.AcceptsConnection(fromNode, fromIndex, connection.Index)));
+        }
+
+        public IEnumerable<MyConnection> GetConnections(MyOutput output)
+        {
+            if (Parent == null)
+                return null;
+
+            // Among the siblings of this node group, find connections that originate in the given output.
+            int fromIndex = Array.IndexOf(GroupOutputNodes, output);
+            if (fromIndex < 0)
+                return null;
+
+            return Parent.Children.SelectMany(sibling => sibling.InputConnections
+                .Where(connection => connection != null && connection.From == this && connection.FromIndex == fromIndex));
+        }
     }
 }

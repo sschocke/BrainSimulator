@@ -1,33 +1,27 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using GoodAI.Core.Task;
-using GoodAI.Core.Memory;
-using ManagedCuda.BasicTypes;
-using System.Diagnostics;
-using System.ComponentModel;
-using GoodAI.Core.Utils;
-using System.Drawing;
-using YAXLib;
-using System.Reflection;
+﻿using GoodAI.Core.Memory;
 using GoodAI.Core.Signals;
+using GoodAI.Core.Utils;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Linq;
+using System.Reflection;
+using YAXLib;
 
 namespace GoodAI.Core.Nodes
 {
     [YAXSerializableType(FieldsToSerialize = YAXSerializationFields.AttributedFieldsOnly)]
-    public abstract class MyNode : IDisposable
+    public abstract class MyNode : IDisposable, IValidatable
     {
         #region Common properties
         
         public virtual bool Sequential { get; set; }        
 
-        [MyBrowsable, ReadOnly(true), Category("\tGeneral"), DisplayName("ID")]
+        [MyBrowsable, ReadOnly(true), Category("\t\tGeneral"), DisplayName("ID")]
         [YAXSerializableField, YAXAttributeForClass]
         public int Id { get; set; }
 
-        [MyBrowsable, Category("\tGeneral"), DisplayName("\tName")]
+        [MyBrowsable, Category("\t\tGeneral"), DisplayName("\tName")]
         [YAXSerializableField, YAXAttributeForClass]
         public string Name { get; set; }
 
@@ -37,11 +31,12 @@ namespace GoodAI.Core.Nodes
                 
         [YAXSerializableField]
         public MyLocation Location { get; set; }
-        
-        public MyNodeGroup Parent { get; internal set; }
+
+        public virtual MyNodeGroup Parent { get; set; }
+
         public MyProject Owner { get; internal set; }
 
-        [MyBrowsable, Category("\tGeneral")]
+        [MyBrowsable, Category("\t\tGeneral")]
         public int TopologicalOrder { get; internal set; }        
 
         private void InitPropertiesDefault()
@@ -66,6 +61,7 @@ namespace GoodAI.Core.Nodes
                 mb.Persistable = pInfo.GetCustomAttribute<MyPersistableAttribute>(true) != null;
                 mb.Unmanaged = pInfo.GetCustomAttribute<MyUnmanagedAttribute>(true) != null;
                 mb.IsOutput = pInfo.GetCustomAttribute<MyOutputBlockAttribute>(true) != null;
+                mb.IsDynamic = pInfo.GetCustomAttribute<DynamicBlockAttribute>(true) != null;
 
                 pInfo.SetValue(this, mb);
             }
@@ -115,9 +111,24 @@ namespace GoodAI.Core.Nodes
 
         #endregion       
 
+        #region Events
+
+        public event EventHandler NodeUpdated;
+
+        public void Updated()
+        {
+            if (NodeUpdated != null)
+            {
+                NodeUpdated(this, EventArgs.Empty);
+            }
+        }
+
+        #endregion
+
         #region Node inputs
 
         public MyConnection[] InputConnections { get; protected set; }        
+        public HashSet<MyConnection>[] OutputConnections { get; protected set; }        
 
         [MyBrowsable, Category("I/O"), ReadOnly(true)]
         public virtual int InputBranches
@@ -128,12 +139,17 @@ namespace GoodAI.Core.Nodes
                 int connToCopy = Math.Min(value, InputBranches);
                 MyConnection[] oldConns = InputConnections;
 
+                for (int i = connToCopy; i < InputBranches; i++)
+                {
+                    var connection = InputConnections[i];
+                    if (connection != null)
+                        connection.Disconnect();
+                }
+
                 InputConnections = new MyConnection[value];
 
                 if (oldConns != null)
-                {
                     Array.Copy(oldConns, InputConnections, connToCopy);
-                }
             }
         }
 
@@ -175,7 +191,28 @@ namespace GoodAI.Core.Nodes
         #region Node outputs
 
         [MyBrowsable, Category("I/O"), ReadOnly(true)]
-        public abstract int OutputBranches { get; set; }   
+        public virtual int OutputBranches
+        {
+            get { return OutputConnections == null ? 0 : OutputConnections.Length; }
+            set
+            {
+                int connToCopy = Math.Min(value, OutputBranches);
+                HashSet<MyConnection>[] oldConns = OutputConnections;
+
+                for (int i = connToCopy; i < OutputBranches; i++)
+                    foreach (MyConnection connection in OutputConnections[i].ToList())
+                        connection.Disconnect();
+
+                OutputConnections = new HashSet<MyConnection>[value];
+
+                if (oldConns != null)
+                    Array.Copy(oldConns, OutputConnections, connToCopy);
+
+                for (int i = connToCopy; i < OutputBranches; i++)
+                    if (OutputConnections[i] == null)
+                        OutputConnections[i] = new HashSet<MyConnection>();
+            }
+        }
 
         public abstract MyMemoryBlock<float> GetOutput(int index);
         public abstract MyMemoryBlock<T> GetOutput<T>(int index) where T : struct;
@@ -192,6 +229,8 @@ namespace GoodAI.Core.Nodes
         #region Memory Blocks
 
         public abstract void UpdateMemoryBlocks();
+
+        public virtual void ReallocateMemoryBlocks() { }
 
         private int[] m_outputBlockSizes = new int[0];
 
@@ -248,13 +287,22 @@ namespace GoodAI.Core.Nodes
                 Name = DefaultName;
             }             
         }
-        
+
         public virtual void Validate(MyValidator validator)
         {
             for (int i = 0; i < InputBranches; i++)
             {
-                validator.AssertError(GetAbstractInput(i) != null, this, "No input available");            
-            }            
+                validator.AssertError(GetAbstractInput(i) != null, this, "No input available");   
+            }          
+  
+            if (!(this is MyNetwork))
+            {
+                for (int i = 0; i < InputBranches; i++)
+                {
+                    if (GetAbstractInput(i) != null)
+                        validator.AssertError(GetAbstractInput(i).Count > 0, this, "Input size has to be larger than zero.");
+                }
+            }
         }      
   
         internal virtual void ValidateMandatory(MyValidator validator) { }
@@ -271,10 +319,50 @@ namespace GoodAI.Core.Nodes
 
         // When node is pinned to any particular GPU - contains an ID of that GPU, 
         //   otherwise contain -1     
-        [MyBrowsable, Category("\tGeneral"), ReadOnly(true)]
+        [MyBrowsable, Category("\t\tGeneral"), ReadOnly(true)]
         public Int32 GPU { get; set; }        
                
         public virtual void TransferToDevice() { }
         public virtual void TransferToHost() { }
+
+        public virtual bool AcceptsConnection(MyNode fromNode, int fromIndex, int toIndex)
+        {
+            MyAbstractMemoryBlock outputBlock = fromNode.GetAbstractOutput(fromIndex);
+
+            if (outputBlock != null && outputBlock.IsDynamic)
+            {
+                // TODO(HonzaS): Enable this later when variable count of dynamic memblocks is supported.
+                if (toIndex >= GetInfo().InputBlocks.Count)
+                    return false;
+
+                PropertyInfo inputBlock = GetInfo().InputBlocks[toIndex];
+                var dynamicAttribute = inputBlock.GetCustomAttribute<DynamicBlockAttribute>();
+                if (dynamicAttribute == null)
+                    return false;
+            }
+
+            return true;
+        }
+
+        public bool CheckForCycle(MyNode to)
+        {
+            var visited = new HashSet<MyNode> ();
+            return CheckForCycle(this, to, visited);
+        }
+
+        private static bool CheckForCycle(MyNode node, MyNode target, ISet<MyNode> visited)
+        {
+            visited.Add(node);
+
+            return node.InputConnections.Where(connection => connection != null && !connection.IsLowPriority)
+                .Select(connection => connection.From)
+                .Any(source =>
+                    source == target || (!visited.Contains(source) && CheckForCycle(source, target, visited)));
+        }
+
+        /// <summary>
+        /// This method is called after deserialization.
+        /// </summary>
+        public virtual void UpdateAfterDeserialization() { }
     }
 }

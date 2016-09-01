@@ -1,21 +1,17 @@
-﻿using GoodAI.Core.Execution;
-using GoodAI.Core.Memory;
-using GoodAI.Core.Nodes;
-using System;
-using System.Collections;
+﻿using GoodAI.Core.Nodes;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace GoodAI.Core.Utils
 {
     public class MyHierarchicalOrdering : IMyOrderingAlgorithm
     {
         public List<MyNode> EvaluateOrder(MyNodeGroup nodeGroup)
-        {            
+        {
+            IList<MyConnection> lowPriorityConnections = new List<MyConnection>();
+
             HashSet<MyNode> nodes = CollectWorkingNodes(nodeGroup);
-            HashSet<MyNode> destinations = FindDestinations(nodeGroup, nodes);
+            HashSet<MyNode> destinations = FindDestinations(nodeGroup, nodes, ref lowPriorityConnections);
 
             if (destinations.Count == 0 && nodes.Count > 0)
             {
@@ -37,7 +33,15 @@ namespace GoodAI.Core.Utils
                 currentOrder++;
             }
 
-            return orderedNodes;
+            var edgesChanged = false;
+            foreach (MyConnection connection in lowPriorityConnections.Where(
+                connection => !connection.From.CheckForCycle(connection.To)))
+            {
+                connection.IsLowPriority = false;
+                edgesChanged = true;
+            }
+            
+            return edgesChanged ? EvaluateOrder(nodeGroup) : orderedNodes;
         }        
 
         private HashSet<MyNode> CollectWorkingNodes(MyNodeGroup nodeGroup)
@@ -58,7 +62,7 @@ namespace GoodAI.Core.Utils
             return nodes;
         }
 
-        private HashSet<MyNode> FindDestinations(MyNodeGroup nodeGroup, HashSet<MyNode> nodes)
+        private HashSet<MyNode> FindDestinations(MyNodeGroup nodeGroup, HashSet<MyNode> nodes, ref IList<MyConnection> lowPriorityConnections)
         {
             HashSet<MyNode> destinations = new HashSet<MyNode>(nodes);
             
@@ -68,10 +72,13 @@ namespace GoodAI.Core.Utils
                 {
                     MyConnection connection = node.InputConnections[i];
 
-                    if (connection != null && nodes.Contains(connection.From))
-                    {
+                    if (connection == null)
+                        continue;
+
+                    if (connection.IsLowPriority)
+                        lowPriorityConnections.Add(connection);
+                    else if (nodes.Contains(connection.From))
                         destinations.Remove(connection.From);
-                    }
                 }
             }
 
@@ -108,18 +115,21 @@ namespace GoodAI.Core.Utils
             {
                 MyConnection connection = node.InputConnections[i];
 
-                if (connection != null && nodes.Contains(connection.From))
-                {
+                if (connection == null)
+                    continue;
+
+                // Low priority connections are not processed. The nodes will be added to the destinations instead.
+                if (connection.IsLowPriority)
+                    continue;
+
+                if (nodes.Contains(connection.From))
                     VisitNode(connection.From, nodes, orderedNodes);
-                }
             }            
 
             orderedNodes.Add(node);
 
             if (node is MyNodeGroup)
-            {
                 orderedNodes.AddRange(EvaluateOrder(node as MyNodeGroup));
-            }
         }       
     }
 }

@@ -1,18 +1,14 @@
-﻿using GoodAI.Core.Memory;
-using GoodAI.Modules.Retina;
+﻿using GoodAI.Core;
+using GoodAI.Core.Observers;
 using GoodAI.Core.Utils;
+using GoodAI.Modules.Retina;
 using OpenTK;
 using OpenTK.Graphics.OpenGL;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using GoodAI.Core.Memory;
 using YAXLib;
-using GoodAI.Core.Observers;
-using GoodAI.Core;
 
 namespace GoodAI.Modules.Observers
 {
@@ -39,7 +35,7 @@ namespace GoodAI.Modules.Observers
         protected override void Execute()
         {
             m_kernel.SetupExecution(Target.InputSize);
-            m_kernel.Run(Target.Input, (int)MyMemoryBlockObserver.RenderingMethod.GrayScale, (int)MyMemoryBlockObserver.RenderingScale.Linear,
+            m_kernel.Run(Target.Input, (int)RenderingMethod.GrayScale, (int)MyMemoryBlockObserver.RenderingScale.Linear,
                 0, 1.0f, VBODevicePointer, Target.Input.Count);
         }        
 

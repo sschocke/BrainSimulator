@@ -2,10 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
 
 namespace GoodAI.Core.Configuration
@@ -13,7 +10,7 @@ namespace GoodAI.Core.Configuration
     [YAXSerializeAs("Configuration"), YAXSerializableType(FieldsToSerialize = YAXSerializationFields.AllFields)]
     public class MyModuleConfig
     {
-        private const string MODULE_CONFIG_FILE = "nodes.xml";
+        public const string MODULE_CONFIG_FILE = "nodes.xml";
         private const string CONVERSION_TYPE_NAME = "Versioning.MyConversion";
 
         [YAXSerializeAs("KnownNodes"), YAXErrorIfMissed(YAXExceptionTypes.Warning)]
@@ -22,8 +19,27 @@ namespace GoodAI.Core.Configuration
         [YAXSerializeAs("KnownWorlds"), YAXErrorIfMissed(YAXExceptionTypes.Warning)]
         public List<MyWorldConfig> WorldConfigList = null;
 
+        [YAXSerializeAs("Categories"), YAXErrorIfMissed(YAXExceptionTypes.Warning)]
+        public List<MyCategoryConfig> CategoryList = null;
+
         [YAXAttributeForClass, YAXSerializableField(DefaultValue = "")]
-        public string RootNamespace { get; private set; }
+        public string RootNamespace
+        {
+            get
+            {
+                return (String.IsNullOrEmpty(rootNamespace) && (this.Assembly != null)) ?
+                    Assembly.GetName().Name  // (we could cache this if there's a performance problem)
+                    :   
+                    rootNamespace;
+            }
+
+            private set
+            {
+                rootNamespace = (value != null) ? value : String.Empty;
+            }
+        }
+        [YAXDontSerialize]
+        private string rootNamespace = String.Empty;
 
         [YAXDontSerialize]
         public Assembly Assembly { get; private set; }
@@ -33,6 +49,10 @@ namespace GoodAI.Core.Configuration
 
         [YAXDontSerialize]
         public MyBaseConversion Conversion { get; private set; }
+
+        public MyModuleConfig()
+        {
+        }
 
         public static MyModuleConfig LoadModuleConfig(FileInfo assemblyFile)
         {
@@ -61,6 +81,7 @@ namespace GoodAI.Core.Configuration
 
             moduleConfig.FinalizeNodeConfigs<MyNodeConfig>(moduleConfig.NodeConfigList);
             moduleConfig.FinalizeNodeConfigs<MyWorldConfig>(moduleConfig.WorldConfigList);
+            moduleConfig.FinalizeCategoriesConfig();
 
             return moduleConfig;
         }
@@ -83,9 +104,20 @@ namespace GoodAI.Core.Configuration
             }
         }
 
+        private void FinalizeCategoriesConfig()
+        {
+            if (CategoryList == null)
+                return;
+
+            foreach (MyCategoryConfig categoryConfig in CategoryList)
+            {
+                categoryConfig.InitIcons(Assembly);
+            }
+        }
+
         private void LoadConversionClass()
         {
-            string typeName = (string.IsNullOrEmpty(RootNamespace) ? "" : RootNamespace + ".") + CONVERSION_TYPE_NAME;
+            string typeName = RootNamespace + "." + CONVERSION_TYPE_NAME;
 
             try
             {
@@ -97,17 +129,20 @@ namespace GoodAI.Core.Configuration
                     Conversion.Module = this;
                 }
             }
-            catch { Conversion = null; }
+            catch
+            {
+                Conversion = null;
+            }
+
+            if (Conversion == null)
+            {
+                MyLog.WARNING.WriteLine("Can't load version (looking for type {0}).", typeName);
+            }
         }
 
         public int GetXmlVersion()
         {
             return Conversion != null ? Conversion.CurrentVersion : 1;
-        }
-
-        public MyModuleConfig()
-        {
-            RootNamespace = String.Empty;
         }
     }
 }

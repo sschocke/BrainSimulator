@@ -1,22 +1,24 @@
-# Introduction
+# How to create a module
 
-In this tutorial, you will learn, how to create a simple node with few tasks, add custom observer to it.
+In this tutorial, you will learn how to create a simple node with few tasks and add a custom observer to it.
 
 For the purpose of this tutorial, we will implement a regression node, which will process last N served data.
 
-# Clone a blank template
+## Clone a blank template
 
 * From [GoodAI GitHub repository](https://github.com/GoodAI/BrainSimulatorNewModule), clone blank template project. It contains preconfigured Visual Studio project which you can use right away.
-* In `Module` folder, rename `NewModule.csproj.user.template-RENAME_ME` to `RegressionModule.csproj.user`
-* Open `SampleNewModule` solution in Visual Studio
-* Rename solution to `RegressionModule`
-* In solution Properties-Application, change `Assembly name` and `Default namespace` to `RegressionModule`
-* In solution Properties-Debug check the path to your Brain Simulator installation (`Start external program` checkbox and `Working directory` path) and change `Command line arguments` so it links to folder with your module
-* Rename `NewModule` project to `RegressionModule`
-* Rename `NewModuleCuda` project to `RegressionModuleCuda`
-* Delete `SomeNode.cs` file from `RegressionModule` project and `SomeNode.cu` kernel file from `RegressionModuleCuda` project
+* Do NOT open solution in Visual studio!
+* We need to give our module a meaningfull name. Lets assume the best name is "RegressionModule" from now on...
+* In `Module` folder, rename `NewModule.csproj.user.template-RENAME_ME` to `NewModule.csproj.user`. This has to be done with Visual Studio not running. Now you can open the solution.
+* Open `SampleNewModule` solution in Visual Studio.
+* Rename solution to `RegressionModule` within the Visual Studio.
+* In `NewModule -> Properties -> Application`; change `Assembly name` and `Default namespace` to `RegressionModule`.
+* In `NewModule -> Properties -> Debug`; check the path to your Brain Simulator installation (`Start external program`) and an argument for loading your module on startup (`-m RegressionModule.dll`).
+* Rename `NewModule` project to `RegressionModule` within the Visual Studio.
+* Rename `NewModuleCuda` project to `RegressionModuleCuda`.
+* Delete `SomeNode.cs` file from `RegressionModule` project and `SomeNode.cu` kernel file from `RegressionModuleCuda` project use these as templates and rename accordingly.
 
-# Create a Node
+## Create Node
 
 * Open the template project a create a new C# class **MyRegressionNode.cs**. Inside the file, you should have some basic structure already
 
@@ -29,7 +31,7 @@ using System.Threading.Tasks;
 
 namespace RegressionModule
 {
-    class MyRegressionNode
+    public class MyRegressionNode
     {
     }
 }
@@ -55,7 +57,7 @@ namespace RegressionModule
     /// <status>Work in progress</status>
     /// <summary>Regression node</summary>
     /// <description>Will perform online linear regression</description>
-    class MyRegressionNode : MyWorkingNode
+    public class MyRegressionNode : MyWorkingNode
     {
         public override void UpdateMemoryBlocks()
         {
@@ -65,7 +67,7 @@ namespace RegressionModule
 }
 ```
 
-# Add Node to Brain Simulator
+## Add Node to Brain Simulator
 
 Node definition has to be added to *conf/nodes.xml*. After that, you can enable your node in View->Configure Node Selection (CTRL+L) view. Change *conf/nodes.xml* to:
 
@@ -80,7 +82,7 @@ Node definition has to be added to *conf/nodes.xml*. After that, you can enable 
 
 After that, you can go to the Configure Node Selection view (CTRL+L) and your node should be there. After checking the checkbox, your node will appear in the [nodes toolstrip](../ui.md)
 
-# Add Memory Blocks
+## Add Memory Blocks
 
 * If we want to actually process some data, we have to add *input memory blocks*. We will add two of them. One for X values and one for Y values. **MyMemoryBlock** class is in **GoodAI.Core.Memory** namespace and **MyInputBlock** annotation in **GoodAI.Core.Utils** namespace, so include those packages too.
 
@@ -117,7 +119,7 @@ public MyMemoryBlock<float> XData { get; private set; }
 public MyMemoryBlock<float> YData { get; private set; }
 ```
 
-# Node Parameters
+## Node Parameters
 Now we should consider some parameters, which our node will need. We will need to define the size of data buffer. When this buffer is full and new data arrives, the oldest data will be overwritten.
 
 The size of the buffer corresponds to the size of our data memory blocks. As this directly affects the size of memory block, this parameter has to be the *node parameter* (see [model](../model.md)).
@@ -155,7 +157,7 @@ namespace RegressionModule
     /// <status>Work in progress</status>
     /// <summary>Regression node</summary>
     /// <description>Will perform online linear regression</description>
-    class MyRegressionNode : MyWorkingNode
+    public class MyRegressionNode : MyWorkingNode
     {
         [MyInputBlock(0)]
         public MyMemoryBlock<float> XInput
@@ -191,12 +193,12 @@ namespace RegressionModule
 }
 ```
 
-# Add Task
+## Add Task
 Main computation unit of nodes are **tasks**. We will add simple one, which will gather data from the input and save them to our memory blocks. Definition of **MyTask** class (which all tasks have to inherit from) is in the **GoodAI.Core.Task** namespace.
 
 ``` csharp
 [Description("Gather data")]
-class MyGatherDataTask : MyTask<MyRegressionNode> {
+public class MyGatherDataTask : MyTask<MyRegressionNode> {
 
     public override void Init(int nGPU)
     {
@@ -233,7 +235,7 @@ We can also add printing some debug information into the UI console for testing 
 
 ``` csharp
 [Description("Gather data")]
-class MyGatherDataTask : MyTask<MyRegressionNode> {
+public class MyGatherDataTask : MyTask<MyRegressionNode> {
 
     private int m_cursor;
 
@@ -267,7 +269,7 @@ Now let's try if the task works correctly. Add your node to empty project and co
 
 ![Node tasks](steps/tut01-04.gif)
 
-# Validation
+## Validation
 
 You may have already noticed some (potential) problems. If you try to run a simulation with no data connected to your node, you will se an error in [validation log](../ui.md).
 
@@ -301,7 +303,7 @@ Now, the node will be working even with bigger inputs, nevertheless it will show
 
 ![Validation warning](steps/tut01-06.png)
 
-# Computation in a Task
+## Computation in a Task
 OK -- we have the data, and now we have to compute the actual linear regression model. We will consider the simplest one where
 
 ![Linear regression](steps/tut01-07.png)
@@ -310,7 +312,7 @@ So let's create a new task and compute model parameters inside of it. We get the
 
 ``` csharp
 [Description("Compute model")]
-class MyComputeTask : MyTask<MyRegressionNode> {
+public class MyComputeTask : MyTask<MyRegressionNode> {
     public override void Init(int nGPU)
     {
 
@@ -408,7 +410,7 @@ namespace RegressionModule
     /// <status>Work in progress</status>
     /// <summary>Regression node</summary>
     /// <description>Will perform online linear regression</description>
-    class MyRegressionNode : MyWorkingNode
+    public class MyRegressionNode : MyWorkingNode
     {
         [MyInputBlock(0)]
         public MyMemoryBlock<float> XInput
@@ -456,7 +458,7 @@ namespace RegressionModule
     }
 
     [Description("Gather data")]
-    class MyGatherDataTask : MyTask<MyRegressionNode> {
+    public class MyGatherDataTask : MyTask<MyRegressionNode> {
 
         private int m_cursor;
 
@@ -470,17 +472,18 @@ namespace RegressionModule
         {
             Owner.XInput.CopyToMemoryBlock(Owner.XData, 0, m_cursor, 1);
             Owner.YInput.CopyToMemoryBlock(Owner.YData, 0, m_cursor, 1);
-            m_cursor = (m_cursor + 1 ) % Owner.BufferSize;
-
+            
             if (Owner.ValidFields != Owner.BufferSize)
             {
                 Owner.ValidFields = m_cursor + 1;
             }
+
+            m_cursor = (m_cursor + 1 ) % Owner.BufferSize;
         }
     }
 
     [Description("Compute model")]
-    class MyComputeTask : MyTask<MyRegressionNode> {
+    public class MyComputeTask : MyTask<MyRegressionNode> {
         public override void Init(int nGPU)
         {
 
@@ -529,7 +532,7 @@ namespace RegressionModule
 }
 ```
 
-# Custom Observer
+## Custom Observer
 Now we will create a simple visualisation of the data and regression model. Start by creating new observer class
 
 ``` csharp
@@ -539,12 +542,11 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-using GoodAI.Core.Testing;
 using GoodAI.Core.Observers;
 
 namespace RegressionModule.Observers
 {
-    class MyRegressionObserver : MyNodeObserver<MyRegressionNode>
+    public class MyRegressionObserver : MyNodeObserver<MyRegressionNode>
     {
         protected override void Execute()
         {
@@ -622,7 +624,7 @@ We obtain x and y values from our data, scale them to plot size and then invert 
 Now, let's bring our attention back to `MyRegressionObserver` class. We will define the kernel.
 
 ``` csharp
-class MyRegressionObserver : MyNodeObserver<MyRegressionNode>
+public class MyRegressionObserver : MyNodeObserver<MyRegressionNode>
 {
     [MyBrowsable, Category("Display")]
     public int Size { get; set; }
@@ -659,7 +661,7 @@ class MyRegressionObserver : MyNodeObserver<MyRegressionNode>
         m_kernel.SetConstantVariable("D_SIZE", Size);
 
         m_kernel.SetupExecution(Target.ValidFields);
-        m_kernel.Run(Target.XData, Target.YData, VBODevicePointer, Target.ValidFields);W
+        m_kernel.Run(Target.XData, Target.YData, VBODevicePointer, Target.ValidFields);
     }
 
     protected override void Reset()
@@ -670,9 +672,10 @@ class MyRegressionObserver : MyNodeObserver<MyRegressionNode>
 }
 ```
 
-We also need to include some packages for `MyBrowsable` and `Category` annotations and for `CudaDeviceVariable` class.
+We also need to include some packages for `MyBrowsable` and `Category` annotations and for `CudaDeviceVariable` and `MyCudaKernel` classes.
 
 ``` csharp
+using GoodAI.Core;
 using GoodAI.Core.Utils;
 using System.ComponentModel;
 using ManagedCuda;

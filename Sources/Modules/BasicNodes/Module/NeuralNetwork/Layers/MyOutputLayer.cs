@@ -1,15 +1,5 @@
 ﻿using GoodAI.Core.Memory;
-using GoodAI.Core.Nodes;
-using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
-using GoodAI.Modules.NeuralNetwork.Tasks;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using YAXLib;
 
 namespace GoodAI.Modules.NeuralNetwork.Layers
 {
@@ -35,9 +25,15 @@ namespace GoodAI.Modules.NeuralNetwork.Layers
         {
             // automatically set number of neurons to the same size as target
             if (Target != null)
-                Neurons = Target.Count;
+                Neurons = Target.Count / ParentNetwork.BatchSize;
 
             base.UpdateMemoryBlocks(); // call after number of neurons are set
+        }
+
+        public override void Validate(MyValidator validator)
+        {
+            base.Validate(validator);
+            validator.AssertError(Target != null, this, "Target of output layer \"" + this.Name + "\" is not defined.");
         }
     }
 }

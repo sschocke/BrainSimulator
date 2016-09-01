@@ -3,13 +3,10 @@ using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
-using ManagedCuda;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
 
 namespace GoodAI.Modules.Transforms
@@ -75,8 +72,8 @@ namespace GoodAI.Modules.Transforms
         public class MyAbsoluteValueTask : MyTask<MyAbsoluteValue>
         {
             private MyCudaKernel m_kernel;
-            private MyCudaKernel m_dotKernel;
-            private MyCudaKernel m_sumKernel;
+            private MyProductKernel<float> m_dotKernel;
+            private MyReductionKernel<float> m_sumKernel;
             private MyCudaKernel m_mulKernel;
 
             [MyBrowsable, Category("Params")]
@@ -95,15 +92,16 @@ namespace GoodAI.Modules.Transforms
                 m_mulKernel = MyKernelFactory.Instance.Kernel(nGPU, @"Transforms\TransformKernels", "PolynomialFunctionKernel");
                 m_mulKernel.SetupExecution(Owner.OutputSize);
 
-                m_dotKernel = MyReductionFactory.Kernel(nGPU, MyReductionFactory.Mode.f_DotProduct_f);
-                m_sumKernel = MyReductionFactory.Kernel(nGPU, MyReductionFactory.Mode.f_Sum_f);
+                m_dotKernel = MyKernelFactory.Instance.KernelProduct<float>(Owner, nGPU, ProductMode.f_DotProduct_f);
+                m_sumKernel = MyKernelFactory.Instance.KernelReduction<float>(Owner, nGPU, ReductionMode.f_Sum_f);
             }
 
             public override void Execute()
             {
                 if (VectorNormalization)
                 {
-                    m_dotKernel.Run(Owner.Temp, 0, Owner.Input, Owner.Input, Owner.InputSize);
+                    //ZXC m_dotKernel.Run(Owner.Temp, 0, Owner.Input, Owner.Input, Owner.InputSize, /* distributed: */ 0);
+                    m_dotKernel.Run(Owner.Temp, Owner.Input, Owner.Input);
                     Owner.Temp.SafeCopyToHost();
                     float length = (float)Math.Sqrt(Owner.Temp.Host[0]);
 
@@ -118,7 +116,8 @@ namespace GoodAI.Modules.Transforms
                 }
                 else if (ScalarNormalization)
                 {
-                    m_sumKernel.Run(Owner.Temp, Owner.Input, Owner.InputSize, 0, 0, 1);
+                    //ZXC m_sumKernel.Run(Owner.Temp, Owner.Input, Owner.InputSize, 0, 0, 1, /* distributed: */ 0);
+                    m_sumKernel.Run(Owner.Temp, Owner.Input);
                     Owner.Temp.SafeCopyToHost();
 
                     float length = Owner.Temp.Host[0];
@@ -168,10 +167,13 @@ namespace GoodAI.Modules.Transforms
     [YAXSerializeAs("Reduction")]
     public class MyReduction : MyTransform
     {
-        
-        public class MyModeTypeConverter : EnumConverter
+        [MyBrowsable, Category("Params"), TypeConverter(typeof(MyReductionModeTypeConverter))]
+        [YAXSerializableField(DefaultValue = ReductionMode.f_Sum_f)]
+        public ReductionMode Mode { get; set; }
+
+        public class MyReductionModeTypeConverter : EnumConverter
         {
-            public MyModeTypeConverter() : base(typeof(MyReductionFactory.Mode)) {}
+            public MyReductionModeTypeConverter() : base(typeof(ReductionMode)) { }
 
             public override bool GetStandardValuesSupported(ITypeDescriptorContext context)
             {
@@ -180,18 +182,12 @@ namespace GoodAI.Modules.Transforms
 
             public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext context)
             {
-                List<MyReductionFactory.Mode> standardValues = new List<MyReductionFactory.Mode>();
-                foreach (MyReductionFactory.Mode m in typeof(MyReductionFactory.Mode).GetEnumValues())
-                    if (m.ToString().Split('_')[1] != "Cosine" && m.ToString().Split('_')[1] != "DotProduct")
-                        standardValues.Add(m);
+                List<ReductionMode> standardValues = new List<ReductionMode>();
+                foreach (ReductionMode m in typeof(ReductionMode).GetEnumValues())
+                    standardValues.Add(m);
                 return new StandardValuesCollection(standardValues);
             }
         }
-
-
-        [MyBrowsable, Category("Params"), TypeConverter(typeof(MyModeTypeConverter))]
-        [YAXSerializableField(DefaultValue = MyReductionFactory.Mode.f_Sum_f)]
-        public MyReductionFactory.Mode Mode { get; set; }
 
         /// <summary>
         /// Performs the reduction operation.
@@ -199,17 +195,18 @@ namespace GoodAI.Modules.Transforms
         [Description("Reduction")]
         public class MyReductionTask : MyTask<MyReduction>
         {
-            private MyCudaKernel m_kernel;
+            private MyReductionKernel<float> m_kernel;
 
             public override void Init(int nGPU)
             {
-                m_kernel = MyReductionFactory.Kernel(nGPU, Owner.Mode);                
+                m_kernel = MyKernelFactory.Instance.KernelReduction<float>(Owner, nGPU, Owner.Mode);
             }
 
             public override void Execute()
             {
                 // no in offset, no out offset, stride 1
-                m_kernel.Run(Owner.Output, Owner.Input, Owner.InputSize, 0, 0, 1);
+                //ZXC m_kernel.Run(Owner.Output, Owner.Input, Owner.InputSize, 0, 0, 1, /* distributed: */ 0);
+                m_kernel.Run(Owner.Output, Owner.Input);
             }
         }
 
@@ -250,6 +247,107 @@ namespace GoodAI.Modules.Transforms
         }
     }
 
+
+    /// <author>GoodAI</author>
+    /// <meta>xx</meta>
+    /// <status>Working</status>
+    /// 
+    /// <summary>Reduction of the input.</summary>
+    /// 
+    /// <description>
+    ///  The node applies several reduction rechniques to scale down the input memory block.
+    ///  
+    ///  <h3> Operation </h3>
+    ///    The desired reduction technique is always in the form "input"_"operation type"_"output". So "f_MinIdx_fi" means that the input is a float memory block on which
+    ///    the Min function is applied and the output is: minimal value as a float, and its index as integer.  "i_MinIdxMaxIdx_4i" takes integer as an input and the output is four integers: minimal value of the
+    ///    input, index of the min-value, maximum value of the input and the max-value index
+    ///  
+    /// </description>
+    //[YAXSerializeAs("Product")]
+    //public class MyProduct : MyTransform
+    //{
+    //    [MyBrowsable, Category("Params"), TypeConverter(typeof(MyProductModeTypeConverter))]
+    //    [YAXSerializableField(DefaultValue = ProductMode.f_DotProduct_f)]
+    //    public ProductMode Mode { get; set; }
+
+    //    public class MyProductModeTypeConverter : EnumConverter
+    //    {
+    //        public MyProductModeTypeConverter() : base(typeof(ProductMode)) { }
+
+    //        public override bool GetStandardValuesSupported(ITypeDescriptorContext context)
+    //        {
+    //            return true;
+    //        }
+
+    //        public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext context)
+    //        {
+    //            List<ProductMode> standardValues = new List<ProductMode>();
+    //            foreach (ProductMode m in typeof(ProductMode).GetEnumValues())
+    //                if (m.ToString().Split('_')[1] != "Cosine" && m.ToString().Split('_')[1] != "DotProduct")
+    //                    standardValues.Add(m);
+    //            return new StandardValuesCollection(standardValues);
+    //        }
+    //    }
+
+    //    /// <summary>
+    //    /// Performs the reduction operation.
+    //    /// </summary>
+    //    [Description("Product")]
+    //    public class MyProductTask : MyTask<MyProduct>
+    //    {
+    //        private MyProductKernel<float> m_kernel;
+
+    //        public override void Init(int nGPU)
+    //        {
+    //            m_kernel = MyKernelFactory.Instance.KernelProduct<float>(Owner, nGPU, Owner.Mode);
+    //        }
+
+    //        public override void Execute()
+    //        {
+    //            // no in offset, no out offset, stride 1
+    //            //ZXC m_kernel.Run(Owner.Output, Owner.Input, Owner.InputSize, 0, 0, 1, /* distributed: */ 0);
+    //            m_kernel.Run(Owner.Output, Owner.Input1, Owner.Input2);
+    //        }
+    //    }
+
+    //    public MyProductTask DoTransform { get; private set; }
+
+    //    public override string Description
+    //    {
+    //        get
+    //        {
+    //            string desc = Mode.ToString().Split('_')[1];
+    //            switch (desc)
+    //            {
+    //                case "Sum":
+    //                    return "f(x)=\u2211x";
+    //                case "MinIdx":
+    //                    return "[min(x),idx]";
+    //                case "MaxIdx":
+    //                    return "[max(x),idx]";
+    //                case "MinMax":
+    //                    return "[min(x),max(x)]";
+    //                case "MinIdxMaxIdx":
+    //                    return "[min(x),idx,max(x),idx]";
+    //                default:
+    //                    return "f(x)=...";
+    //            }
+    //        }
+    //    }
+
+    //    public override void UpdateMemoryBlocks()
+    //    {
+    //        string sig = Mode.ToString().Split('_')[2];
+    //        if (sig.Length == 1)
+    //            OutputSize = 1;
+    //        else if (sig.Length == 4 || sig[0] == '4')
+    //            OutputSize = 4;
+    //        else
+    //            OutputSize = 2;
+    //    }
+    //}
+
+
     /// <author>GoodAI</author>
     /// <meta>mb</meta>
     /// <status>Working</status>
@@ -270,6 +368,9 @@ namespace GoodAI.Modules.Transforms
         /// Set <b>Minimum</b> and <b>Maximum</b> for interval which is to be indicated.<br/>
         /// 1.0f is then assigned to the i-th position if the value falls into i-th interval
         /// of length (Maximum - Minimum) / Levels; 0.0f is assigned otherwise.
+        /// If <b>StrictThreshold</b> is true, then values that fall outside of interval
+        /// &lt;Minimum, Maximum&gt; will not be in any of the Levels intervals. Otherwise
+        /// input values less than Minimum are internally changed to Minimum and vice versa for Maximum.
         /// </summary>
         [Description("Threshold")]
         public class MyThresholdTask : MyTask<MyThreshold>
@@ -284,6 +385,10 @@ namespace GoodAI.Modules.Transforms
             [YAXAttributeFor("Params"), YAXSerializableField(DefaultValue = float.PositiveInfinity)]
             public float Maximum { get; set; }
 
+            [MyBrowsable, Category("Params")]
+            [YAXAttributeFor("Params"), YAXSerializableField(DefaultValue = false)]
+            public bool StrictThreshold {get; set; }
+
             public override void Init(int nGPU)
             {
                 m_kernel = MyKernelFactory.Instance.Kernel(nGPU, @"Transforms\TransformKernels", "ThresholdKernel");
@@ -292,7 +397,7 @@ namespace GoodAI.Modules.Transforms
             public override void Execute()
             {
                 m_kernel.SetupExecution(Owner.InputSize);
-                m_kernel.Run(Minimum, Maximum, Owner.Input, Owner.Output, Owner.InputSize, Owner.Levels);
+                m_kernel.Run(Minimum, Maximum, StrictThreshold ? 1 : 0, Owner.Input, Owner.Output, Owner.InputSize, Owner.Levels);
             }
         }
 
@@ -302,7 +407,14 @@ namespace GoodAI.Modules.Transforms
         {
             get
             {
-                return "__\u2015\u203E\u203E";
+                if (DoTransform.StrictThreshold)
+                {
+                    return "__\u2015\u203E\u203E strict";
+                }
+                else
+                {
+                    return "__\u2015\u203E\u203E";
+                }
             }
         }
 
@@ -321,42 +433,57 @@ namespace GoodAI.Modules.Transforms
     [YAXSerializeAs("GoniometricFunction")]
     public class MyGoniometricFunction : MyTransform
     {
+        public enum MyGonioType
+        {
+            [Description("sin(x)")]
+            Sine = 0,
+            [Description("cos(x)")]
+            Cosine = 1,
+            [Description("tan(x)")]
+            Tan = 2,
+            [Description("tanh(x)")]
+            Tanh = 3,
+            [Description("sinh(x)")]
+            Sinh = 4,
+            [Description("cosh(x)")]
+            Cosh = 5,
+            [Description("asin(x)")]
+            Asin = 6,
+            [Description("acos(x)")]
+            Acos = 7,
+            [Description("atan2(x,y)")]
+            Atan2 = 10  // 8 and 9 is for atan and acot
+        }
+
+        [MyBrowsable, Category("Params")]
+        [YAXAttributeFor("Params"), YAXSerializableField(DefaultValue = MyGonioType.Sine)]
+        public MyGonioType Type { get; set; }
+
+        public MyGoniometricTask DoTransform { get; private set; }
+
+        public override string Description
+        {
+            get
+            {
+                return "f(x) = " + Type.GetAttributeProperty((DescriptionAttribute x) => x.Description);
+            }
+        }
+
+        public override void UpdateMemoryBlocks()
+        {
+            if (Type == MyGonioType.Atan2)
+                OutputSize = InputSize / 2;
+            else
+                OutputSize = InputSize;
+        }
 
         /// <summary>
-        /// The node contains six functions: Sinus, Cosines, Tangents and their hyperbolic equivalents.
+        /// The node contains sine, cosine, tangent and their hyperbolic and inverse equivalents. Atan2 takes pairs of floats on input.
         /// </summary>
         [Description("Goniometric")]
-        public class MyGoniometricTask : MyTask<MyTransform>
+        public class MyGoniometricTask : MyTask<MyGoniometricFunction>
         {
             private MyCudaKernel m_kernel;
-
-            public enum MyGonioType             
-            {
-                [Description("sin(x)")]
-                Sine = 0,
-                [Description("cos(x)")]
-                Cosine = 1,
-                [Description("tan(x)")]
-                Tan = 2,
-                [Description("tanh(x)")]
-                Tanh = 3,
-                [Description("sinh(x)")]
-                Sinh = 4,
-                [Description("cosh(x)")]
-                Cosh = 5
-            }
-
-            [MyBrowsable, Category("Params")]
-            [YAXAttributeFor("Params"), YAXSerializableField(DefaultValue = MyGonioType.Sine)]
-            public MyGonioType Type {get; set;}
-
-            public string Description
-            {
-                get
-                {
-                    return "f(x) = " + Type.GetAttributeProperty((DescriptionAttribute x) => x.Description);
-                }
-            }
 
             public override void Init(int nGPU)
             {
@@ -366,27 +493,9 @@ namespace GoodAI.Modules.Transforms
             public override void Execute()
             {
                 m_kernel.SetupExecution(Owner.OutputSize);
-                m_kernel.Run(Owner.Input, Owner.Output, Owner.InputSize, (int)Type);  //TODO
+                m_kernel.Run(Owner.Input, Owner.Output, Owner.InputSize, (int)Owner.Type);
             }
         }
-
-        public MyGoniometricTask DoTransform { get; private set; }
-
-        public override string Description
-        {
-            get
-            {
-                if (DoTransform != null)
-                {
-                    return DoTransform.Description;
-                }
-                else
-                {
-                    return base.Description;
-                }
-            }
-        }
-
     }
 
     /// <author>GoodAI</author>
@@ -502,7 +611,7 @@ namespace GoodAI.Modules.Transforms
         /// <summary>Node to restrict the range of each element of the input memory block.
         ///   There are two methods to apply:
         ///   <ul>
-        ///    <li> Standart: simply cuts all values higher or lower. </li> 
+        ///    <li> Standard: simply cuts all values higher or lower. </li> 
         ///    <li> Modulo: apllies the <b>modulus operator</b> that computes the remainder from the integer division. So the result is: ''value % Maximum + Minimum''</li> 
         ///   </ul>
         /// </summary>

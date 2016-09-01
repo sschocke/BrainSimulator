@@ -2,13 +2,8 @@
 using GoodAI.Core.Memory;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
-using ManagedCuda;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
 
 namespace GoodAI.Modules.Transforms
@@ -17,7 +12,9 @@ namespace GoodAI.Modules.Transforms
     /// <meta>df</meta>
     /// <status>Working</status>
     /// <summary>Temporal operation on input data.</summary>
-    /// <description>Accumulates values according chosen strategy or delays or quantizes input data.</description>    
+    /// <description>Accumulates values according chosen strategy or delays or quantizes input data.<br/><br/>
+    /// <b>How to use it as accumulator:</b> ApproachValue, Geometric, Factor = 1, Target = 0
+    /// </description>    
     [YAXSerializeAs("Accumulator")]
     public class MyAccumulator : MyTransform
     {
@@ -27,12 +24,12 @@ namespace GoodAI.Modules.Transforms
 
         [MyBrowsable, Category("Params"), Description("Number of time steps to remember")]
         [YAXSerializableField(DefaultValue = 1)]
-        public int DelayMemorySize { get; set; }                      
-        
-        [MyTaskGroup("Mode")]
-        public MyShiftDataTask ShiftData { get; private set; }
+        public int DelayMemorySize { get; set; }
+
         [MyTaskGroup("Mode")]
         public MyApproachValueTask ApproachValue { get; private set; }
+        [MyTaskGroup("Mode")]
+        public MyShiftDataTask ShiftData { get; private set; }
         [MyTaskGroup("Mode")]
         public MyQuantizedCopyTask CopyInput { get; private set; }
 
@@ -80,7 +77,7 @@ namespace GoodAI.Modules.Transforms
         }
 
         /// <summary>
-        /// Delays data for given number of timesteps.<br/>
+        /// Delays data for given number of timesteps (set in node's <b>DelayMemorySize</b> parameter)<br/>
         /// For initial period it sets given value or uses first value available.
         /// </summary>
         [Description("Delay")]
@@ -94,8 +91,11 @@ namespace GoodAI.Modules.Transforms
             [YAXSerializableField(DefaultValue = 0f)]
             public float InitialValue { get; set; }
 
+            private bool m_firstRound;
+
             public override void Init(Int32 nGPU)
-            {                
+            {
+                m_firstRound = true;
             }
 
             public override void Execute()
@@ -105,7 +105,7 @@ namespace GoodAI.Modules.Transforms
                     Owner.DelayedInputs.CopyFromMemoryBlock(Owner.Input, 0, 0, Owner.OutputSize);
                 }
 
-                if (SimulationStep < Owner.DelayMemorySize)
+                if (m_firstRound)
                 {
                     if (UseFirstInput)
                     {
@@ -115,6 +115,7 @@ namespace GoodAI.Modules.Transforms
                     {
                         Owner.Output.Fill(InitialValue);
                     }
+                    m_firstRound = false;
                 }
                 else
                 {
@@ -138,15 +139,18 @@ namespace GoodAI.Modules.Transforms
 
         /// <summary>
         /// Sums all input values with given decay:
-        /// For arithmetic adds/subtracts difference from previous step,<br/>
-        /// for geometric decay is given by chosen factor,<br/>
-        /// for momentum calculates approximation of moving average.<br/>
+        /// <ul>
+        /// <li><b>Arithmetic</b> adds/subtracts difference from previous step</li>
+        /// <li><b>Geometric</b> decay is given by chosen factor (value = f * (oldvalue + input - target) + target)</li>
+        /// <li><b>Momentum</b> calculates approximation of moving average (value = input * (1-f) + oldvalue * f)</li>
+        /// </ul> 
         /// </summary>
         [Description("Approach Value")]
         public class MyApproachValueTask : MyTask<MyAccumulator>
         {
             private MyCudaKernel m_kernel;
 
+            // have to be same as in AddAndApproachKernel
             public enum SequenceType
             {
                 Arithmetic,
@@ -154,19 +158,19 @@ namespace GoodAI.Modules.Transforms
                 Momentum
             }
 
-            [MyBrowsable, Category("Params")]
+            [MyBrowsable, Category("\tParams")]
             [YAXSerializableField(DefaultValue = SequenceType.Geometric)]
             public SequenceType ApproachMethod { get; set; }
 
-            [MyBrowsable, Category("Params")]
-            [YAXSerializableField(DefaultValue = 0.9f)]
+            [MyBrowsable, Category("\tParams")]
+            [YAXSerializableField(DefaultValue = 1f)]
             public float Factor { get; set; }
 
-            [MyBrowsable, Category("Params")]
+            [MyBrowsable, Category("Arithmetic")]
             [YAXSerializableField(DefaultValue = 0.1f)]
             public float Delta { get; set; }
 
-            [MyBrowsable, Category("Params")]
+            [MyBrowsable, Category("\tParams")]
             [YAXSerializableField(DefaultValue = 0)]
             public float Target { get; set; }
 
@@ -212,6 +216,10 @@ namespace GoodAI.Modules.Transforms
             [YAXSerializableField(DefaultValue = 10)]
             public int TimePeriod { get; set; }
 
+            [MyBrowsable, Category("Params"), Description("Offset before first copy")]
+            [YAXSerializableField(DefaultValue = 0)]
+            public int TimeOffset { get; set; }
+
             public override void Init(Int32 nGPU)
             {
 
@@ -219,7 +227,7 @@ namespace GoodAI.Modules.Transforms
 
             public override void Execute()
             {
-                if (SimulationStep % TimePeriod == 0)
+                if ((SimulationStep - TimeOffset) % TimePeriod == 0)
                 {
                     Owner.Input.CopyToMemoryBlock(Owner.Output, 0, 0, Owner.InputSize);
                 }

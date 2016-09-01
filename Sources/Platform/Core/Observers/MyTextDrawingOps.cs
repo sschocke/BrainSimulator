@@ -1,21 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.IO;
-using System.Drawing;
-using System.Runtime.InteropServices;
-using System.Threading.Tasks;
-using System.Text.RegularExpressions;
+﻿using GoodAI.Core.Memory;
 using GoodAI.Core.Utils;
-using GoodAI.Core.Observers.Helper;
 using ManagedCuda;
-using ManagedCuda.VectorTypes;
 using ManagedCuda.BasicTypes;
-using GoodAI.Core.Memory;
-using GoodAI.Core.Task;
+using System;
+using System.Drawing;
 using System.Drawing.Imaging;
-using System.Reflection;
+using System.Runtime.InteropServices;
 
 
 namespace GoodAI.Core.Observers.Helper
@@ -52,7 +42,7 @@ namespace GoodAI.Core.Observers.Helper
             return alphaValues;
         }
 
-        private static int[] stringToDigitIndexes(string str)
+        private static int[] StringToDigitIndexes(string str)
         {
             int[] res = new int[str.Length];
 
@@ -72,15 +62,43 @@ namespace GoodAI.Core.Observers.Helper
             return res;
         }
 
-        public static void DrawString(string str, int x, int y, uint bgColor, uint fgColor, CUdeviceptr image, int imageWidth, int imageHeight)
+        public static void String2Index(string str, CudaDeviceVariable<float> outIndexes)
+        {
+            if(str.Length > outIndexes.Size)
+            {
+                //TODO: new?
+                //outIndexes.Size = str.Length + 1;
+            }
+
+            for(int i = 0; i < str.Length && i < outIndexes.Size; ++i)
+            {
+                if (str[i] >= ' ' && str[i] <= '~')
+                {
+                    outIndexes[i] = (float)(str[i] - ' ');
+                }
+                else//by default create "space" for unknown character
+                {
+                    outIndexes[i] = ' ';
+                }
+            }
+        }
+
+        [Obsolete("This method causes a crash when used multiple times in one brain. Please use DrawStringFromGPUMem with String2Index instead. JM")]
+        public static void DrawString(string str, int x, int y, uint bgColor, uint fgColor, CUdeviceptr image, int imageWidth, int imageHeight, int maxStringSize = 20)
         {
             // Crop if the string is too long
-            if (str.Length > 20)
-                str = str.Substring(0, 20);
+            if (str.Length > maxStringSize)
+                str = str.Substring(0, maxStringSize);
+
+            if (str.Length > 200)
+            {
+                //__constant__ int D_DIGIT_INDEXES[200];
+                throw new ArgumentException("Hardcoded value in DrawDigitsKernel.cs");
+            }
 
             MyCudaKernel m_drawDigitKernel = MyKernelFactory.Instance.Kernel(MyKernelFactory.Instance.DevCount - 1, @"Observers\DrawDigitsKernel");
             CudaDeviceVariable<float> characters = MyMemoryManager.Instance.GetGlobalVariable<float>("CHARACTERS_TEXTURE", MyKernelFactory.Instance.DevCount - 1, LoadDigits);
-            
+
             m_drawDigitKernel.SetConstantVariable("D_BG_COLOR", bgColor);
             m_drawDigitKernel.SetConstantVariable("D_FG_COLOR", fgColor);
             m_drawDigitKernel.SetConstantVariable("D_IMAGE_WIDTH", imageWidth);
@@ -89,12 +107,31 @@ namespace GoodAI.Core.Observers.Helper
             m_drawDigitKernel.SetConstantVariable("D_DIGIT_SIZE", CharacterSize);
             m_drawDigitKernel.SetConstantVariable("D_DIGITMAP_NBCHARS", CharacterMapNbChars);
 
-            int[] indexes = stringToDigitIndexes(str);
+            int[] indexes = StringToDigitIndexes(str);
             m_drawDigitKernel.SetConstantVariable("D_DIGIT_INDEXES", indexes);
-            m_drawDigitKernel.SetConstantVariable("D_DIGIT_INDEXES_LEN", indexes.Length);                                   
+            m_drawDigitKernel.SetConstantVariable("D_DIGIT_INDEXES_LEN", indexes.Length);
 
             m_drawDigitKernel.SetupExecution(CharacterSize * indexes.Length);
             m_drawDigitKernel.Run(image, characters.DevicePointer, x, y);
+        }
+
+        public static void DrawStringFromGPUMem(CudaDeviceVariable<float> inString, int x, int y, uint bgColor, uint fgColor, CUdeviceptr image, int imageWidth, int imageHeight, int stringOffset, int stringLen)
+        {
+            MyCudaKernel m_drawDigitKernel = MyKernelFactory.Instance.Kernel(MyKernelFactory.Instance.DevCount - 1, @"Observers\DrawStringKernel");
+            CudaDeviceVariable<float> characters = MyMemoryManager.Instance.GetGlobalVariable<float>("CHARACTERS_TEXTURE", MyKernelFactory.Instance.DevCount - 1, LoadDigits);
+
+            //MyKernelFactory.Instance.Synchronize();
+
+            m_drawDigitKernel.SetConstantVariable("D_BG_COLOR", bgColor);
+            m_drawDigitKernel.SetConstantVariable("D_FG_COLOR", fgColor);
+            m_drawDigitKernel.SetConstantVariable("D_IMAGE_WIDTH", imageWidth);
+            m_drawDigitKernel.SetConstantVariable("D_IMAGE_HEIGHT", imageHeight);
+            m_drawDigitKernel.SetConstantVariable("D_DIGIT_WIDTH", CharacterWidth);
+            m_drawDigitKernel.SetConstantVariable("D_DIGIT_SIZE", CharacterSize);
+            m_drawDigitKernel.SetConstantVariable("D_DIGITMAP_NBCHARS", CharacterMapNbChars);
+
+            m_drawDigitKernel.SetupExecution(CharacterSize * stringLen);
+            m_drawDigitKernel.Run(image, characters.DevicePointer, x, y, inString.DevicePointer + sizeof(float) * stringOffset, stringLen);
         }
     }
 }

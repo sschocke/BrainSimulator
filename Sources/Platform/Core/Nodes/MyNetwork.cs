@@ -1,16 +1,11 @@
-﻿using GoodAI.Core.Nodes;
-using GoodAI.Core.Task;
+﻿using GoodAI.Core.Configuration;
+using GoodAI.Core.Memory;
 using GoodAI.Core.Utils;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Reflection;
-using System.Threading.Tasks;
-using YAXLib;
 using System.IO;
-using GoodAI.Core.Memory;
-using GoodAI.Core.Configuration;
+using System.Reflection;
+using YAXLib;
 
 namespace GoodAI.Core.Nodes
 {
@@ -28,6 +23,10 @@ namespace GoodAI.Core.Nodes
             public int FromIndex { get; set; }
             [YAXSerializableField, YAXAttributeForClass]
             public int ToIndex { get; set; }
+            [YAXSerializableField, YAXAttributeForClass]
+            public bool IsLowPriority { get; set; }
+            [YAXSerializableField, YAXAttributeForClass]
+            public bool IsHidden { get; set; }
         };
 
         [YAXSerializableField, YAXSerializeAs("Connections")]
@@ -63,7 +62,9 @@ namespace GoodAI.Core.Nodes
                         From = inputConnection.From.Id,
                         To = inputConnection.To.Id,
                         FromIndex = inputConnection.FromIndex,
-                        ToIndex = inputConnection.ToIndex
+                        ToIndex = inputConnection.ToIndex,
+                        IsLowPriority = inputConnection.IsLowPriority,
+                        IsHidden = inputConnection.IsHidden
                     };
                     m_connections.Add(cp);
                 }
@@ -91,7 +92,7 @@ namespace GoodAI.Core.Nodes
             m_connections.AddRange(filtered);
         }
 
-        public int UpdateAfterDeserialization(int topId, MyProject parentProject)
+        public int UpdateAfterDeserialization(int topId, MyProject parentProject, bool showWarnings = true)
         {
             if (topId < this.Id)
             {
@@ -101,7 +102,7 @@ namespace GoodAI.Core.Nodes
             this.Owner = parentProject;
             
             Dictionary<int, MyNode> nodes = new Dictionary<int,MyNode>();
-            topId = CollectNodesAndUpdate(this, nodes, topId);
+            topId = CollectNodesAndUpdate(this, nodes, topId, showWarnings);
 
             parentProject.ReadOnly = false;
             
@@ -134,11 +135,15 @@ namespace GoodAI.Core.Nodes
 
             Iterate(true, findUnknownAction);
 
+            Iterate(true, node => node.UpdateAfterDeserialization());
+
             foreach (MyConnectionProxy cp in m_connections)
             {                
                 try
                 {
                     MyConnection connection = new MyConnection(nodes[cp.From], nodes[cp.To], cp.FromIndex, cp.ToIndex);
+                    connection.IsLowPriority = cp.IsLowPriority;
+                    connection.IsHidden = cp.IsHidden;
                     connection.Connect();
                 }
                 catch (Exception e)
@@ -150,7 +155,7 @@ namespace GoodAI.Core.Nodes
             return topId;
         }        
 
-        private int CollectNodesAndUpdate(MyNodeGroup nodeGroup, Dictionary<int, MyNode> nodes, int topId) 
+        private int CollectNodesAndUpdate(MyNodeGroup nodeGroup, Dictionary<int, MyNode> nodes, int topId, bool showWarnings = true) 
         {
             foreach (MyParentInput inputNode in nodeGroup.GroupInputNodes)
             {
@@ -181,7 +186,8 @@ namespace GoodAI.Core.Nodes
                 nodes[node.Id] = node;                
 
                 //parent link 
-                node.Parent = nodeGroup;
+                TrySetParent(node, nodeGroup, showWarnings);
+
                 node.Owner = Owner;          
                 //topId collect
                 if (topId < node.Id)
@@ -197,7 +203,7 @@ namespace GoodAI.Core.Nodes
              
                 if (node is MyNodeGroup)
                 {
-                    topId = CollectNodesAndUpdate(node as MyNodeGroup, nodes, topId);
+                    topId = CollectNodesAndUpdate(node as MyNodeGroup, nodes, topId, showWarnings);
                 }
 
                 //obsolete check 
@@ -215,11 +221,26 @@ namespace GoodAI.Core.Nodes
             return topId;
         }
 
+        private static void TrySetParent(MyNode node, MyNodeGroup nodeGroup, bool showWarning = true)
+        {
+            try
+            {
+                // Setting parent may fail since v0.4. Handle it to allow loading of old [incorrect] projects.
+                node.Parent = nodeGroup;  
+            }
+            catch (InvalidOperationException e)
+            {
+                // TODO(HonzaS): Remove the switch - this is here only for copy+paste to work with neural layers
+                if (showWarning)
+                    MyLog.ERROR.WriteLine("Unable to update node ({0}): {1}", node.Name, e.Message);
+            }
+        }
+
         public void SaveState(string fileName, uint simulationStep)
         {
             try
             {
-                string dataFolder = Path.GetDirectoryName(fileName) + "\\" + Path.GetFileNameWithoutExtension(fileName) + ".statedata";
+                string dataFolder = MyProject.MakeDataFolderFromFileName(fileName);
 
                 MyNetworkState networkState = new MyNetworkState()
                 {
@@ -272,5 +293,10 @@ namespace GoodAI.Core.Nodes
                 return new MyNetworkState();                
             }
         }
+    }
+
+    public class ClipboardNetwork : MyNetwork
+    {
+        
     }
 }

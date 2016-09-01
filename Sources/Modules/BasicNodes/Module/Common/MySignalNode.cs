@@ -2,12 +2,7 @@
 using GoodAI.Core.Signals;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
 
 namespace GoodAI.Core.Nodes
@@ -50,11 +45,6 @@ namespace GoodAI.Core.Nodes
             {
                 return "Alter signal:";
             }
-        }
-
-        public override void Validate(MyValidator validator)
-        {
-            base.Validate(validator);           
         }
 
         public override void UpdateMemoryBlocks()

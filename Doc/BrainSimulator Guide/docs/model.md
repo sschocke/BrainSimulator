@@ -93,7 +93,7 @@ You should write "node comment" (the triple slash comment) before each of your n
 
 Please notice several details in the implementation:
 
-### Annotations:
+### Annotations
 For **Node and Task**, you can use the following annotations:
 
 * `MyObsolete(ReplacedBy=typeof(MyBetterNode))` - shows obsolete info in UI
@@ -103,6 +103,10 @@ For **Node and Task**, you can use the following annotations:
     - `Order=100` - For ordering the task in node. Tasks in lower number are earlier.
     - `Disabled=true` - Task will be disabled by default
 * `YAXSerializeAs("Text")` - this will be used for serialization to XML
+
+For **Tasks**, you can use the following annotations as well:
+
+* `Description("Text")` - used in node task list as a task's name (task's class name is used when not specified)
 
 For **Node and Task properties**, you can use the following annotations:
 
@@ -121,7 +125,7 @@ There is one more annotation just for the **Task**:
 
 * `MyTaskGroup("GroupName")` - adds task to the task group (see [below](model.md#task-group))
 
-### Memory blocks:
+### Memory blocks
 Memory blocks are defined by MyMemoryBlock<T> type property. If you want your MemoryBlock to be I/O (i.e. visible in the UI and connectible to the other nodes), you must annotate them with `MyInputBlock(x)` or `MyOutputBlock(x)` where x is the number of input or output. For convenient use, you should also implement the **get** and **set** methods for them. This is really easy as the only thing you have to do is
 
 ``` csharp
@@ -133,7 +137,7 @@ public MyMemoryBlock<float> Results
 }
 ```
 
-Notice, that first argument of `GetOutput` and `SetOutput` must correspond with the number in annotation.
+Note that first argument of `GetOutput` and `SetOutput` must correspond with the number in annotation.
 
 Your memory blocks must be declared as shown. Do not use arrays or lists of them. It’s not supported yet.
 
@@ -153,6 +157,16 @@ Each memory block is divided into **Host** and **Device** part. Host corresponds
 * `Fill(value)` - fills entire memory block (Host and Device) with given value - works with `float`, `int`, `uint`, `bool` and `byte[]` values
 * `GetBytes(byte[] destBuffer)` - returns memory block data (Device=Host)
 
+#### Dynamic memory blocks
+
+Memory blocks marked with the DynamicBlockAttribute become dynamic, allowing the node creator to reallocate the memory block to a different size with a call to the block's Reallocate(int count) method. The system will try to reallocate both the host and device memory and if it's successful, it will copy the data from the original memory block over to the new one. Overflowing data is cropped, missing data is zero-filled.
+
+Dynamic connections are marked with a white outline.
+
+It is possible to use dynamic output blocks, but only nodes that have dynamic input blocks will be able to accept the connections.
+
+**Warning: it is possible to create a loop of dynamic blocks leading to a cascade of reallocations. Take care when using dynamic blocks as node outputs.**
+
 ### Validation
 If some other conditions must be fulfilled for the correct execution of your node, put them in the `MyNode.Validate()` method. If you want to omit validation completely (not a good idea), just override that method.
 
@@ -169,7 +183,7 @@ Each of them takes 3 arguments. Bool value (this should be condition, you are te
 You can also directly send messages by calling `AddInfo(MyNode, string)`, `AddWarning()` or `AddError()` methods.
 
 
-### Tasks:
+### Tasks
 You must implement your own class for every task you need (see below).
 Order of tasks in the source file will be preserved during the execution of your node. As a rule of thumb: **do not implement constructor with parameters and do not instantiate any memory block or task!** Your class will be analysed for you and all necessary instantiations and allocations will be done automatically at the right time .
 
@@ -256,7 +270,18 @@ During the run, you will see a set of 3 tasks, from which only one can be active
 ![Task group](img/model-taskgroup.png)
 
 ### Worlds
-Worlds correspond to various environments in Brain Simulator. You can implement your own worlds in a same way, as you implement Nodes (`MyWorld` actually inherits from `MyWorkingNode`), but instead of `MyWorkingNode`, your World will inherit from `MyWorld`.
+Worlds correspond to various environments in Brain Simulator. You can implement your own worlds in a same way, as you implement Nodes (`MyWorld` actually inherits from `MyWorkingNode`), but instead of `MyWorkingNode`, your World will inherit from `MyWorld`. You need to register the new worlds in the `nodes.xml` in the `KnownWorlds` node like this:
+``` xml
+<?xml version="1.0" encoding="utf-8" ?>
+<Configuration  RootNamespace="GoodAI.SeMeIntegration">
+  <KnownNodes>
+  </KnownNodes>
+  <KnownWorlds>
+    <World type="GoodAI.MyNewModule.MyNewWorld" >
+    </World>
+  </KnownWorlds>
+</Configuration>
+``` 
 
 ### Signals
 Signals are a way of unusual communication between nodes. They can be used to transfer some specific information (so you don't need another MemoryBlock) to any node, following in the data flow (so inter-nodes don't have to have some knowledge about your signals).
@@ -351,6 +376,8 @@ Usage of execution blocks is simple. Your node has to implement `IMyCustomExecut
 * `CreateCustomInitPhasePlan(MyExecutionBlock defaultInitPhasePlan)`
 
 InitPhasePlan is being used for first step of simulation. ExecutionPlan is being used for all following simulation steps. Each method gets the default plan as argument, so if you do not want to make any changes to it, you can simply return it.
+
+Every time you implement your own execution plan in node group, make sure that it will work even when the group will be empty. You can easily check necessary prerequisities in `Validate` method.
 
 Some simple usage of execution blocks can be seen in following example. You can change `SomeValue` and see (in log) how the execution of tasks change accordingly.
 
@@ -506,3 +533,20 @@ Where `X` is a number of version the method accepts and `Y` is a number of versi
 Input to the conversion method is a string, which represents the loaded .brain file. The function can alter the string in any way it wants and then returns it (on return, the string should represent the .brain file in `Y` version).
 
 The sequence of conversion methods is invoked, until the opened project version is the same as the current module version. The project has to be saved after the conversion (message is written to Brain Simulator log).
+
+
+## Dynamic model changes <a name="dynamic-model"></a>
+
+The simulation will allow changes on nodes that implement the `IModelChanger` interface. It's meant to be used on subclasses of `MyNodeGroup`, but potentially there could be more uses in the future.
+
+In your class you'll have to implement one getter and one method:
+
+`AffectedNode` - in most cases you should return `this` here. The UI decides which graph views to refresh based on this.
+
+`ChangeModel` - here you perform your changes. You disconnect and remove nodes, you add and connect new ones. The method returns true if the model was indeed changed, otherwise return false for better performance.
+The method gets one parameter of type `IModelChanges`.
+
+Register nodes that were removed by `changes.RemoveNode` and nodes that are to be added by `changes.AddNode`. The simulation will handle stuff like initialization, memory block creation and scheduling based on this. Nodes that are marked to be removed list will not be usable again. If you plan on using the nodes in the future, don't add them via `changes.RemoveNode` so that they will keep their memory blocks.
+
+It's your responsibility to correctly create the node. The easiest way is to call `var newNode = Owner.CreateNode<TypeOfTheNodeYoureCreating>()` and then optionally `newNode.EnableDefaultTasks()`.
+All things that you have to watch out for during design time apply here as well.

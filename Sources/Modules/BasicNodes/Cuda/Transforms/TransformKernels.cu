@@ -70,7 +70,7 @@ extern "C"
 		}
 	}	
 
-	__global__ void ThresholdKernel(float min, float max, float* input, float* output, int size, int count)
+	__global__ void ThresholdKernel(float min, float max, int mode, float* input, float* output, int size, int count)
 	{		
 		int id = blockDim.x * blockIdx.y * gridDim.x
 			+ blockDim.x * blockIdx.x
@@ -78,16 +78,31 @@ extern "C"
 
 		__shared__ float delta;
 
-		if(threadIdx.x < size)
+		if(id < size)
 		{	
-			if (id == 0)
+			if (threadIdx.x == 0)
 				delta = (max - min)/count;
 			__syncthreads();
 
 			for (int i = 0; i < count; i++)
-				output[id * count + i] = 0;
+				output[i * size + id] = 0;
 
-			int idx = (int)floor(fmaxf(0, fminf(((input[id] - min) / delta), count - 1)));
+			int idx;
+			float fidx = ((input[id] - min) / delta);
+
+			switch (mode)
+			{
+			case 0: // consider values outside of the interval <min,max>
+				idx = (int)floor(fmaxf(0, fminf(fidx, count - 1)));
+				break;
+			case 1: // strict threshold
+				if (fidx < 0.0f || fidx >= count)
+				{
+					return;
+				}
+				idx = (int)fidx;
+				break;
+			}
 			output[idx * size + id] = 1.0f;
 		}
 	}	
@@ -133,7 +148,7 @@ extern "C"
 	}	
 
 	__global__ void LinearValuesKernel(const float min, const float max, float* output, const int size, const int shift)
-	{		
+	{
 		int id = blockDim.x * blockIdx.y * gridDim.x
 			+ blockDim.x * blockIdx.x
 			+ threadIdx.x;
@@ -141,7 +156,7 @@ extern "C"
 		__shared__ float delta;
 
 		if (threadIdx.x == 0) 
-			delta = (max-min)/(size-1);
+			delta = (max-min)/fmaxf((size-1), 1);
 		__syncthreads();
 
 		if(id < size)
@@ -176,12 +191,64 @@ extern "C"
 				break;
 			case 5:
 				output[id] = coshf(input[id]);
-				break;			
+				break;
+			case 6:
+				output[id] = asinf(input[id]);
+				break;
+			case 7:
+				output[id] = acosf(input[id]);
+				break;
+			case 10:
+				output[id] = atan2f(input[2*id], input[2*id+1]);
+				break;
 			}
 		}		
 	}
 
-	__global__ void AddAndApproachValueKernel(float targetValue, float delta, float factor, int method, float* input, float* output, int size)
+	__global__ void ExponentialFunctionKernel(float exponent, float* input, float* output, int size)
+	{
+		int id = blockDim.x * blockIdx.y * gridDim.x
+			+ blockDim.x * blockIdx.x
+			+ threadIdx.x;
+
+		if (id < size)
+		{
+			output[id] = pow(input[id], exponent);
+		}
+	}
+
+	__global__ void LogarithmicFunctionKernel(float* input, float* output, int size, const int type)
+	{
+		int id = blockDim.x * blockIdx.y * gridDim.x
+			+ blockDim.x * blockIdx.x
+			+ threadIdx.x;
+
+		if (id < size)
+		{
+			switch (type)
+			{
+			case 1:
+				output[id] = logf(input[id]);
+				break;
+			case 2:
+				output[id] = log2f(input[id]);
+				break;
+			case 3:
+				output[id] = log10f(input[id]);
+				break;
+			}
+		}
+	}
+
+	// have to be same as in MyAccumulator node
+	enum SequenceType
+	{
+		Arithmetic,
+		Geometric,
+		Momentum
+	};
+
+	__global__ void AddAndApproachValueKernel(float targetValue, float delta, float factor, SequenceType method, float* input, float* output, int size)
 	{		
 		int id = blockDim.x * blockIdx.y * gridDim.x
 			+ blockDim.x * blockIdx.x
@@ -189,7 +256,7 @@ extern "C"
 
 		if(id < size)
 		{	           
-			if (method == 0) 
+			if (method == Arithmetic) 
 			{
 				output[id] += input[id];
 				float x = output[id];
@@ -198,14 +265,14 @@ extern "C"
 				float finalDelta = copysign(delta, diff);
 				output[id] = x + finalDelta;
 			}
-			else if (method == 1) 
+			else if (method == Geometric) 
 			{
 				output[id] += input[id];
 				float x = output[id];
 
 				output[id] = factor * (x - targetValue) + targetValue;
 			}
-			else 
+			else if (method == Momentum)
 			{
 				output[id] = input[id] * (1 - factor) + output[id] * factor;
 			}

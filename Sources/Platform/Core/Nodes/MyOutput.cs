@@ -1,11 +1,8 @@
-﻿using GoodAI.Core.Memory;
-using GoodAI.Core.Task;
-using GoodAI.Core.Utils;
-using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using GoodAI.Core.Memory;
+using GoodAI.Core.Utils;
+using GoodAI.Platform.Core.Utils;
 
 namespace GoodAI.Core.Nodes
 {
@@ -46,5 +43,18 @@ namespace GoodAI.Core.Nodes
 
         public override void UpdateMemoryBlocks() { }
         public override void Validate(MyValidator validator) { }
+
+        public override bool AcceptsConnection(MyNode fromNode, int fromIndex, int toIndex)
+        {
+            if (Parent == null)
+                return true;
+
+            IEnumerable<MyConnection> connections = Parent.GetConnections(this);
+            if (connections == null)
+                return true;
+
+            return connections
+                .All(connection => connection.To.AcceptsConnection(fromNode, fromIndex, connection.ToIndex));
+        }
     }
 }

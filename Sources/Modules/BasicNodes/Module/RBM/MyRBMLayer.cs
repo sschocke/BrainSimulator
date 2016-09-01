@@ -1,15 +1,11 @@
-﻿using GoodAI.Core.Memory;
+﻿using GoodAI.Core;
+using GoodAI.Core.Memory;
+using GoodAI.Core.Utils;
 using GoodAI.Modules.NeuralNetwork.Layers;
 using GoodAI.Modules.RBM.Tasks;
-using GoodAI.Core.Utils;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
-using GoodAI.Core;
 
 namespace GoodAI.Modules.RBM
 {
@@ -32,11 +28,17 @@ namespace GoodAI.Modules.RBM
     /// <br/>
     /// <p>Use RBMFilterObserver (upper right by default) to see weights.</p>
     /// </description>
-    public class MyRBMLayer : MyHiddenLayer
+    public class MyRBMLayer : MyOutputLayer
     {
 
         public MyRBMInitLayerTask RBMInitLayerTask { get; protected set; }
         public MyRBMRandomWeightsTask RBMRandomWeightsTask { get; protected set; }
+
+
+        [YAXSerializableField(DefaultValue = 1)]
+        [MyBrowsable, Category("\tLayer")]
+        [ReadOnly(false)]
+        public override int Neurons { get; set; }
 
 
         [YAXSerializableField(DefaultValue = false)]
@@ -45,7 +47,7 @@ namespace GoodAI.Modules.RBM
 
         [YAXSerializableField(DefaultValue = 0)]
         private float m_dropout = 0;
-        [MyBrowsable, Category("\tActivation")]
+        [MyBrowsable, Category("\tLayer"), DisplayName("RBM Dropout")]
         public float Dropout
         {
             get { return m_dropout; }
@@ -58,12 +60,6 @@ namespace GoodAI.Modules.RBM
         }
 
         // Memory blocks
-
-        [MyInputBlock(1)]
-        public MyMemoryBlock<float> Target
-        {
-            get { return GetInput(1); }
-        }
 
         public MyMemoryBlock<float> PreviousOutput { get; protected set; }
         public MyMemoryBlock<float> RBMWeightPositive { get; protected set; }
@@ -101,6 +97,7 @@ namespace GoodAI.Modules.RBM
                     Filter.ColumnHint = (int)Math.Sqrt((double)Input.Count);
                     
                     RBMWeightPositive.Count = Neurons * Input.Count;
+                    Weights.Count += Weights.Count%2;
                 }
                 if (Target != null)
                 {
@@ -111,7 +108,10 @@ namespace GoodAI.Modules.RBM
 
         public override void Validate(MyValidator validator)
         {
-            base.Validate(validator);
+            //base.Validate(validator);
+            validator.AssertError(Neurons > 0, this, "Number of neurons should be > 0");
+            validator.AssertError(Input != null, this, "Neural network node \"" + this.Name + "\" has no input.");
+            validator.AssertWarning(Connection != ConnectionType.NOT_SET, this, "ConnectionType not set for " + this);
         }
 
         #region Kernels

@@ -4,13 +4,19 @@ using GoodAI.Modules.NeuralNetwork.Layers;
 using GoodAI.Modules.RBM;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
+using GoodAI.Modules.Matrix;
+using GoodAI.Modules.NeuralNetwork.Group;
+using GoodAI.Modules.NeuralNetwork.Layers;
+using ManagedCuda;
 using ManagedCuda.BasicTypes;
+using ManagedCuda.CudaBlas;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using GoodAI.Core.Nodes;
 
 namespace GoodAI.Modules.NeuralNetwork.Tasks
 {
@@ -27,13 +33,17 @@ namespace GoodAI.Modules.NeuralNetwork.Tasks
         public MyFCForwardTask() { } //parameterless constructor
 
         private MyCudaKernel m_forwardKernel;
+        private MyCudaKernel m_forwardBatchKernel;
         private MyCudaKernel m_L1TermKernel;
         private MyCudaKernel m_L2TermKernel;
+        private MyCudaKernel m_softmaxKernel;
         public override void Init(int nGPU)
         {
             m_forwardKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Layer\FeedForwardKernels", "FullyConnectedForwardKernel");
+            m_forwardBatchKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Layer\FeedForwardKernels", "FullyConnectedForwardBatchKernel");
             m_L1TermKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Layer\RegularizationTermKernels", "L1TermKernel");
             m_L2TermKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Layer\RegularizationTermKernels", "L2TermKernel");
+            m_softmaxKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Activation\ActivationFunction", "SoftmaxKernel");
         }
 
         public override void Execute() //Task execution
@@ -44,19 +54,46 @@ namespace GoodAI.Modules.NeuralNetwork.Tasks
             if (Owner is MyOutputLayer)
                 dropout = 0;
 
-            m_forwardKernel.SetupExecution(Owner.Neurons);
-            m_forwardKernel.Run(
-                (int)Owner.ActivationFunction,
-                Owner.Input,
-                Owner.Output,
-                Owner.Weights,
-                Owner.NeuronInput,
-                Owner.Bias,
-                Owner.DropoutMask,
-                dropout,
-                Owner.Input.Count,
-                Owner.Output.Count
+            if (Owner.ParentNetwork.BatchSize == 1)
+            {
+                // cuBLAS tends to be slower when BatchSize is 1, use the kernel instead
+                m_forwardKernel.SetupExecution(Owner.Neurons);
+                m_forwardKernel.Run(
+                    (int)Owner.ActivationFunction,
+                    Owner.Input,
+                    Owner.Output,
+                    Owner.Weights,
+                    Owner.NeuronInput,
+                    Owner.Bias,
+                    Owner.DropoutMask,
+                    dropout,
+                    Owner.Input.Count,
+                    Owner.Output.Count
                 );
+            }
+            else
+            {
+                // NeuronInput = Weights x Input
+                MyCublasFactory.Instance.Gemm(Operation.NonTranspose, Operation.NonTranspose,
+                    Owner.Neurons, Owner.ParentNetwork.BatchSize, Owner.Input.Count / Owner.ParentNetwork.BatchSize, 1.0f,
+                    Owner.Weights.GetDevice(Owner), Owner.Neurons,
+                    Owner.Input.GetDevice(Owner), Owner.Input.Count / Owner.ParentNetwork.BatchSize,
+                    0.0f, Owner.NeuronInput.GetDevice(Owner), Owner.Neurons
+                    );
+
+                // add bias to neuron input and compute activation
+                m_forwardBatchKernel.SetupExecution(Owner.Neurons * Owner.ParentNetwork.BatchSize);
+                m_forwardBatchKernel.Run(
+                    (int)Owner.ActivationFunction,
+                    Owner.Output,
+                    Owner.NeuronInput,
+                    Owner.Bias,
+                    Owner.DropoutMask,
+                    dropout,
+                    Owner.Neurons,
+                    Owner.ParentNetwork.BatchSize
+                );
+            }
 
             if (Owner.ParentNetwork.L1 > 0) // don't take performance hit if L1 is not used
             {
@@ -79,6 +116,46 @@ namespace GoodAI.Modules.NeuralNetwork.Tasks
                     Owner.Weights.Count
                     );
             }
+
+
+            // do a trick to avoid infinity (NaN) problems with exponential values in softmax
+            if (Owner.ActivationFunction == ActivationFunctionType.SOFTMAX)
+            {
+                Owner.Output.SafeCopyToHost();
+
+                float expSum = 0;
+
+                float[] f = Owner.Output.Host;
+                float max = f.Max();
+
+                for (int i = 0; i < f.Length; i++)
+                {
+                    float exp = (float) Math.Exp(f[i] - max);
+                    f[i] = exp;
+                    expSum += exp;
+                }
+
+
+                // CPU version of the commented kernel below
+                for (int i = 0; i < f.Length; i++)
+                {
+                    f[i] /= expSum;
+                }
+
+                Array.Copy(f, Owner.Output.Host, f.Length);
+
+                Owner.Output.SafeCopyToDevice();
+
+                /* 
+                 * GPU version is slower, don't use it for now
+                m_softmaxKernel.SetupExecution(Owner.Neurons);
+                m_softmaxKernel.Run(
+                    Owner.Output,
+                    expSum,
+                    Owner.Neurons
+                    );*/
+
+            }
         }
     }
 
@@ -95,39 +172,64 @@ namespace GoodAI.Modules.NeuralNetwork.Tasks
         public MyFCBackDeltaTask() { } //parameterless constructor
 
         private MyCudaKernel m_deltaKernel; // kernel
+        private MyCudaKernel m_deltaBatchKernel; // batch kernel
         public override void Init(int nGPU)
         {
             m_deltaKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Layer\DeltaKernels", "FullyConnectedDeltaKernel");
+            m_deltaBatchKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Layer\DeltaKernels", "FullyConnectedDeltaBatchKernel");
         }
 
         public override void Execute() //Task execution
         {
-            // pointer to previous layer
-            MyAbstractLayer previousLayer = Owner.PreviousLayer;
+            MyNode node = Owner.Input.Owner;
 
-            if (previousLayer != null)
+            if (node is MyAbstractLayer)
             {
-                // reset delta
+                MyAbstractLayer previousLayer = node as MyAbstractLayer;
+
+                // reset delta only if next is not Gaussian HACK.
+                // (Gaussian layer already reseted delta and filled with regularization deltas)
                 previousLayer.Delta.Fill(0);
 
                 // determine input to previous layer
-                CUdeviceptr prevInputPtr;
-                if (previousLayer is MyAbstractWeightLayer)
-                    prevInputPtr = (previousLayer as MyAbstractWeightLayer).NeuronInput.GetDevicePtr(previousLayer.GPU);
-                else
-                    prevInputPtr = previousLayer.Input.GetDevicePtr(previousLayer.GPU);
+                CUdeviceptr prevInputPtr = MyAbstractLayer.DetermineInput(previousLayer);
 
-                m_deltaKernel.SetupExecution(previousLayer.Neurons);
-                m_deltaKernel.Run(
-                    (int)previousLayer.ActivationFunction,
-                    prevInputPtr,
-                    previousLayer.Delta,
-                    Owner.Delta,
-                    Owner.Weights,
-                    Owner.ParentNetwork.Dropout,
-                    previousLayer.Neurons,
-                    Owner.Neurons
+                if (Owner.ParentNetwork.BatchSize == 1)
+                {
+                    // cuBLAS tends to be slower when BatchSize is 1, use the kernel instead
+                    m_deltaKernel.SetupExecution(previousLayer.Neurons);
+                    m_deltaKernel.Run(
+                        (int)previousLayer.ActivationFunction,
+                        prevInputPtr,
+                        previousLayer.Delta,
+                        Owner.Delta,
+                        Owner.Weights,
+                        Owner.ParentNetwork.Dropout,
+                        previousLayer.Neurons,
+                        Owner.Neurons
                     );
+                }
+                else
+                {
+                    // previousLayer.Delta = Transpose(Weights) x Delta
+                    MyCublasFactory.Instance.Gemm(Operation.Transpose, Operation.NonTranspose,
+                        previousLayer.Neurons, Owner.ParentNetwork.BatchSize, Owner.Neurons, 1.0f,
+                        Owner.Weights.GetDevice(Owner), Owner.Neurons,
+                        Owner.Delta.GetDevice(Owner), Owner.Neurons,
+                        0.0f, previousLayer.Delta.GetDevice(Owner), previousLayer.Neurons
+                        );
+
+                    // multiply previousLayer.Delta by activation derivatives of previous layer
+                    m_deltaBatchKernel.SetupExecution(previousLayer.Neurons * Owner.ParentNetwork.BatchSize);
+                    m_deltaBatchKernel.Run(
+                        (int)previousLayer.ActivationFunction,
+                        prevInputPtr,
+                        previousLayer.Delta,
+                        Owner.ParentNetwork.Dropout,
+                        previousLayer.Neurons,
+                        Owner.ParentNetwork.BatchSize
+                    );
+                }
             }
         }
     }
@@ -159,7 +261,9 @@ namespace GoodAI.Modules.NeuralNetwork.Tasks
             if (backpropTask == null)
                 MyLog.ERROR.WriteLine("Undetermined backprop task in " + Owner.ParentNetwork);
             else
+            {
                 backpropTask.Execute(Owner); // call the group task to do the backpropagation
+            }
         }
     }
 }

@@ -28,6 +28,7 @@
 #define INV_PERM 10
 #define MODULO 11
 #define DIVISION_INT 12
+#define EQUAL 13
 
 
 #define MAX_OPERANDS 20
@@ -135,6 +136,16 @@ extern "C"
 			out = i_tmp[threadId];
 			break;
 
+		case EQUAL: // Warning: uses a strict equality comparison on floats
+		{
+			bool eq = true;
+			for (int i = 1; eq && (i < inputsCount); i++)
+			{
+				eq = (eq && (out == inputs[i][threadId]));
+			}
+			out = eq ? 1.0f : 0.0f;
+			break;
+		}
 		default:
 			break;
 		}
@@ -197,6 +208,11 @@ extern "C"
 			output = __float2int_rz(input1 / input2);
 			break;
 		}
+		case EQUAL:
+		{
+			output = (input1 == input2) ? 1.0f : 0.0f;
+			break;
+		}
 		default:
 			break;
 		}	
@@ -215,22 +231,26 @@ extern "C"
 		switch (method)
 		{
 		case PERM:
-			float tmp = input1[(int)input2[threadId]];
+			{
+				float tmp = input1[(int)input2[threadId]];
 
-			if (input1 == output)
-				__threadfence();
+				if (input1 == output)
+					__threadfence();
 
-			output[threadId] = tmp;
-			break;
+				output[threadId] = tmp;
+				break;
+			}
 
 		case INV_PERM:
-			int idx = (int)input2[threadId];
+			{
+				int idx = (int)input2[threadId];
 
-			if (input1 == output)
-				__threadfence();
+				if (input1 == output)
+					__threadfence();
 
-			output[idx] = input1[threadId];
-			break;
+				output[idx] = input1[threadId];
+				break;
+			}
 
 		default:
 			CombineTwoVectorsInternal(input1[threadId], input2[threadId], output[threadId], method);
@@ -248,51 +268,56 @@ extern "C"
 		switch (method)
 		{
 		case PERM:
-			if (count2 > count1)
-				return;
+			{
+				if (count2 > count1)
+					return;
 
-			float tmp = input1[(int)input2[threadId]];
+				float tmp = input1[(int)input2[threadId]];
 
-			if (input1 == output)
-				__threadfence();
+				if (input1 == output)
+					__threadfence();
 
-			output[threadId] = tmp;
-			break;
-
+				output[threadId] = tmp;
+				break;
+			}
 		case INV_PERM:
-			if (count2 > count1)
-				return;
+			{
+				if (count2 > count1)
+					return;
 
-			int idx = (int)input2[threadId];
+				int idx = (int)input2[threadId];
 
-			if (input1 == output)
-				__threadfence();
+				if (input1 == output)
+					__threadfence();
 
-			output[idx] = input1[threadId];
-			break;
+				output[idx] = input1[threadId];
+				break;
+			}
 
 		default:
-			int minCount = count1 <= count2 ? count1 : count2;
-
-			if(threadId < minCount)
-			{	
-				CombineTwoVectorsInternal(input1[threadId], input2[threadId], output[threadId], method);
-				return;
-			}
-
-
-			if (count1 > count2)
 			{
-				if (threadId < count1)
-					output[threadId] = input1[threadId];
-			}
-			else if (count2 > count1)
-			{
-				if (threadId < count2)
-					output[threadId] = method == SUB ? -input2[threadId] : input2[threadId];
-			}
+				int minCount = count1 <= count2 ? count1 : count2;
 
-			break;
+				if (threadId < minCount)
+				{
+					CombineTwoVectorsInternal(input1[threadId], input2[threadId], output[threadId], method);
+					return;
+				}
+
+
+				if (count1 > count2)
+				{
+					if (threadId < count1)
+						output[threadId] = input1[threadId];
+				}
+				else if (count2 > count1)
+				{
+					if (threadId < count2)
+						output[threadId] = method == SUB ? -input2[threadId] : input2[threadId];
+				}
+
+				break;
+			}
 		}
 	}
 
@@ -433,7 +458,18 @@ extern "C"
 
 		if(threadId < inputSize)
 		{												
-			output[threadId] = (1 - weight) * input1[threadId] + weight * input2[threadId];
+			if (weight <= 0)
+			{
+				output[threadId] = input1[threadId];
+			}
+			else if (weight >= 1)
+			{
+				output[threadId] = input2[threadId];
+			}
+			else
+			{
+				output[threadId] = (1 - weight) * input1[threadId] + weight * input2[threadId];
+			}
 		}
 	}
 
@@ -444,8 +480,19 @@ extern "C"
 			+ threadIdx.x;
 
 		if(threadId < inputSize)
-		{												
-			output[threadId] = (1 - weightMemBlock[0]) * input1[threadId] + weightMemBlock[0] * input2[threadId];
+		{					
+			if (weightMemBlock[0] <= 0)
+			{
+				output[threadId] = input1[threadId];
+			}
+			else if (weightMemBlock[0] >= 1)
+			{
+				output[threadId] = input2[threadId];
+			}
+			else
+			{
+				output[threadId] = (1 - weightMemBlock[0]) * input1[threadId] + weightMemBlock[0] * input2[threadId];
+			}
 		}
 	}
 

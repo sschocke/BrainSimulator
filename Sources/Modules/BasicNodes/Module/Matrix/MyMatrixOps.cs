@@ -1,18 +1,6 @@
 ﻿using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
-using GoodAI.Core.Task;
-using GoodAI.Modules.Transforms;
-using GoodAI.Core.Utils;
-using ManagedCuda;
-using ManagedCuda.BasicTypes;
 using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using YAXLib;
-using ManagedCuda.CudaBlas;
 
 namespace GoodAI.Modules.Matrix
 {
@@ -30,8 +18,8 @@ namespace GoodAI.Modules.Matrix
         MultiplElemntWise = 1 << 4,
         Substraction = 1 << 5,
 
-        MinIndex = 1 << 6,
-        MaxIndex = 1 << 7,
+        AbsMinIndex = 1 << 6,
+        AbsMaxIndex = 1 << 7,
 
         GetCol = 1 << 8,
         GetRow = 1 << 9,
@@ -45,6 +33,7 @@ namespace GoodAI.Modules.Matrix
 
         EuclidDist = 1 << 13,
 
+        Pow = 1 << 14,
         Exp = 1 << 15,
         Log = 1 << 16,
 
@@ -53,7 +42,11 @@ namespace GoodAI.Modules.Matrix
         Round = 1 << 19,
         Ceil = 1 << 20,
 
-        Copy = 1 << 21
+        Copy = 1 << 21,
+
+        Transpose = 1 << 22,
+        
+        PermuteRows = 1 << 23
     }
 
 
@@ -108,6 +101,11 @@ namespace GoodAI.Modules.Matrix
                 {
                     Result.Count = Result.ColumnHint = 1;
                 }
+                else if (operation == MatOperation.AbsMinIndex || operation == MatOperation.AbsMaxIndex)
+                {
+                    Result.ColumnHint = 1;
+                    Result.Count = 1;
+                }
                 else if (operation == MatOperation.Multiplication)
                 {
                     if (A != null && B != null && A.ColumnHint != 0 && B.Count > 1)
@@ -130,6 +128,19 @@ namespace GoodAI.Modules.Matrix
                 {
                     Result.ColumnHint = Math.Max(A.ColumnHint, B.ColumnHint);
                     Result.Count = Math.Max(A.Count, B.Count);
+                }
+                else if (operation == MatOperation.Transpose)
+                {
+                    Result.Dims = A.Dims.Transpose();
+                }
+                else if (operation == MatOperation.EuclidDist)
+                {
+                    if (B != null)
+                    {
+                        Result.Count = A.Count / A.ColumnHint;
+                        Result.ColumnHint = 1;
+                    }
+
                 }
             }
             return Result;
@@ -171,6 +182,10 @@ namespace GoodAI.Modules.Matrix
                     is_it_correct |= A.Count == 1 || B.Count == 1;
                     is_it_correct |= (Math.Max(A.Count, B.Count) == Result.Count) && (Math.Max(A.ColumnHint, B.ColumnHint) == Result.ColumnHint);
                 }
+            }
+            else if (operation == MatOperation.EuclidDist)
+            {
+                is_it_correct = (A.ColumnHint == B.Count);
             }
             return is_it_correct;
 

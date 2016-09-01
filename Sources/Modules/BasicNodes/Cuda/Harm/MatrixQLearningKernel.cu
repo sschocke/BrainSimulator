@@ -16,35 +16,37 @@ extern "C"
 	// detects multiple max values
 	__global__ void findMaxIndMultipleDetector(float *input, int* maxInd, int size)
 	{
-		int max = 0;
+		int maxIndex = 0;
 		int count = 1;
 
 		for (int i = 1; i < size; i++){
-			if(input[max] < input[i]){
-				max = i;
+			if (input[maxIndex] < input[i]){
+				maxIndex = i;
 				count = 1;
-			}else if(input[max] == input[i]){
+			}
+			else if (input[maxIndex] == input[i]){
 				count++;
 			}
 		}
 		if(count>1)
 			maxInd[0] = -1;
 		else
-			maxInd[0] = max;
+			maxInd[0] = maxIndex;
 	}
 
-	__global__ void oneOfNSelection(float *buffer, int* index, int size)
+	__global__ void oneOfNSelection(float *buffer, int* index, int size, float value)
 	{
 		int threadId = blockDim.x*blockIdx.y*gridDim.x	//rows preceeding current row in grid
-				+ blockDim.x*blockIdx.x					//blocks preceeding current block
-				+ threadIdx.x;
-		
-		if(threadId < size && threadId != index[0])
+			+ blockDim.x*blockIdx.x						//blocks preceeding current block
+			+ threadIdx.x;
+
+		if (threadId < size && threadId != index[0])
 		{
 			buffer[threadId] = 0;
 
-		}else if(threadId < size && threadId == index[0]){
-			buffer[threadId] = 1;
+		}
+		else if (threadId < size && threadId == index[0]){
+			buffer[threadId] = value;
 		}
 	}
 
@@ -87,7 +89,9 @@ extern "C"
 		}
 	}
 
-	__global__ void createTexture(float* plotValues, int* actionIndices, unsigned int* actionLabels, int numOfActions, int patchWidth, int patchHeight, 
+	__global__ void createTexture(
+		float* plotValues, int* actionIndices, unsigned int* actionLabels, int numOfActions, 
+		int patchWidth, int patchHeight, 
 		float minValue, float maxValue, int itemsX, int itemsY, unsigned int* pixels) 
 	{
 		int threadId = blockDim.x*blockIdx.y*gridDim.x	//rows preceeding current row in grid
@@ -105,11 +109,12 @@ extern "C"
 		int pixY = threadId / textureWidth % patchHeight;
 
 		int actionIndex = actionIndices[patchX * itemsY + (itemsY - patchY - 1)];
-		unsigned int noActionFlag = actionIndex > 0 ? 0xFFFFFFFF : 0;
+		// if the utility value is zero, there is no action (marged by black/zeros)
+		unsigned int noActionFlag = (plotValues[patchX * itemsY + (itemsY - patchY - 1)] != 0) ? 0xFFFFFFFF : 0;
 
 		if (threadId < size) 
 		{						
-			pixels[threadId] = float_to_uint_rgba(plotValues[patchX * itemsY + (itemsY - patchY - 1)], 2, 2, minValue, maxValue);								
+			pixels[threadId] = float_to_uint_rgba(plotValues[patchX * itemsY + (itemsY - patchY - 1)], 2, 2, minValue, maxValue);	
 			pixels[threadId] &= noActionFlag;
 			pixels[threadId] |= actionLabels[pixY * numOfActions * patchWidth + actionIndex * patchWidth + pixX];
 		}		

@@ -1,19 +1,13 @@
-﻿using GoodAI.Core.Memory;
-using GoodAI.Modules.NeuralNetwork.Layers;
-using GoodAI.Modules.NeuralNetwork.Tasks;
-using GoodAI.Modules.RBM.Tasks;
-using GoodAI.Core.Task;
-using GoodAI.Core.Utils;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using GoodAI.Core.Nodes;
-using CustomModels.RBM.Tasks;
-using YAXLib;
+﻿using CustomModels.RBM.Tasks;
 using GoodAI.Core;
+using GoodAI.Core.Memory;
+using GoodAI.Core.Nodes;
+using GoodAI.Core.Utils;
+using GoodAI.Modules.NeuralNetwork.Layers;
+using GoodAI.Modules.RBM.Tasks;
+using System;
+using System.ComponentModel;
+using YAXLib;
 
 namespace GoodAI.Modules.RBM
 {
@@ -29,8 +23,12 @@ namespace GoodAI.Modules.RBM
     /// 
     /// There must be precisely one input layer in an RBM group.
     /// </description>
-    class MyRBMInputLayer : MyAbstractLayer, IMyCustomTaskFactory
+    public class MyRBMInputLayer : MyAbstractLayer, IMyCustomTaskFactory
     {
+        public override ConnectionType Connection
+        {
+            get { return ConnectionType.ONE_TO_ONE; } // phil inserted to remove warning about connection not set
+        }
 
         public MyRBMInitLayerTask RBMInitLayerTask { get; private set; }
 
@@ -196,9 +194,8 @@ namespace GoodAI.Modules.RBM
 
         public void CreateTasks()
         {
-            // TODO - can be replaced by copy tasks
-            ForwardTask = new MyEmptyTask();
-            DeltaBackTask = new MyEmptyTask();
+            ForwardTask = new MyRBMInputForwardTask();
+            DeltaBackTask = new MyRBMInputBackwardTask();
         }
 
         internal void SetOutput(float[] f)

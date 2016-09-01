@@ -2,21 +2,23 @@
 using GoodAI.Core.Utils;
 using ManagedCuda.BasicTypes;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Collections.Generic;
 
 namespace GoodAI.Core.Memory
 {
     public class MyMemoryBlockSerializer
     {        
-        private byte[] buffer = new byte[8192];
+        private byte[] m_buffer = new byte[8192];
 
-        private static string GetTempStorage(MyProject project)
+        public static string GetTempStorage(MyProject project)
         {
-            return Path.GetTempPath() +  "\\bs_temporal\\" + project.Name + ".statedata";
+            return GetTempStorage(project.Name);
+        }
+
+        public static string GetTempStorage(String projectName)
+        {
+            return Path.GetTempPath() + "\\bs_temporal\\" + projectName + ".statedata";
         }
 
         public static void ClearTempStorage(MyProject project)
@@ -70,6 +72,11 @@ namespace GoodAI.Core.Memory
             return memoryBlock.Name + ".mb";
         }
 
+        public static string GetUniqueName(MyAbstractMemoryBlock memoryBlock)
+        {
+            return memoryBlock.Owner.Id.ToString() + "#" + memoryBlock.Name;
+        }
+
         public static bool TempDataExists(MyProject project)
         {
             return Directory.Exists(GetTempStorage(project));
@@ -98,7 +105,8 @@ namespace GoodAI.Core.Memory
                 }
                 else
                 {
-                    throw new FileNotFoundException("No data folder defined.");
+                    throw new FileNotFoundException(
+                        "File not found in temporal folder and no data folder defined: " + fileName);
                 }
 
                 fileName += "\\" + GetFileName(memoryBlock);
@@ -114,7 +122,7 @@ namespace GoodAI.Core.Memory
 
         public void LoadBlock(MyAbstractMemoryBlock memoryBlock, string globalDataFolder)
         {
-            int length = buffer.Length;
+            int length = m_buffer.Length;
             SizeT size = memoryBlock.GetSize();
 
             while (size > length)
@@ -122,9 +130,9 @@ namespace GoodAI.Core.Memory
                 length *= 2;
             }
 
-            if (length != buffer.Length)
+            if (length != m_buffer.Length)
             {
-                buffer = new byte[length];
+                m_buffer = new byte[length];
             }
 
             try
@@ -137,21 +145,23 @@ namespace GoodAI.Core.Memory
                     throw new InvalidDataException("Different size of a stored memory block (" + fileSize + " B != " + size + " B)");                        
                 }
 
-                BinaryReader reader = new BinaryReader(File.OpenRead(filePath));
-                reader.Read(buffer, 0, size);
-                reader.Close();
+                using (var reader = new BinaryReader(File.OpenRead(filePath)))
+                {
+                    reader.Read(m_buffer, 0, size);
+                }
 
-                memoryBlock.Fill(buffer);                    
+                memoryBlock.Fill(m_buffer);                    
             }
             catch (Exception e)
             {
-                MyLog.WARNING.WriteLine("Memory block loading failed (" + memoryBlock.Owner.Name + "." + memoryBlock.Name + "): " + e.Message);
+                MyLog.WARNING.WriteLine("Memory block loading failed (node: {0} (id: {1}), block: {2}): {3}", memoryBlock.Owner.Name,
+                    memoryBlock.Owner.Id, memoryBlock.Name, e.Message);
             }            
         }
 
         public void SaveBlock(MyAbstractMemoryBlock memoryBlock)
         {
-            int length = buffer.Length;
+            int length = m_buffer.Length;
             SizeT size = memoryBlock.GetSize();
 
             while (size > length)
@@ -159,11 +169,11 @@ namespace GoodAI.Core.Memory
                 length *= 2;
             }
 
-            if (length != buffer.Length)
+            if (length != m_buffer.Length)
             {
-                buffer = new byte[length];
+                m_buffer = new byte[length];
             }
-            memoryBlock.GetBytes(buffer);
+            memoryBlock.GetBytes(m_buffer);
             
             string tempFolder = GetTempStorage(memoryBlock.Owner.Owner) + "\\" + GetNodeFolder(memoryBlock.Owner);
             Directory.CreateDirectory(tempFolder);
@@ -172,14 +182,15 @@ namespace GoodAI.Core.Memory
 
             try
             {
-                BinaryWriter writer = new BinaryWriter(File.Open(filePath, FileMode.Create));
-
-                writer.Write(buffer, 0, size);
-                writer.Close();
+                using (var writer = new BinaryWriter(File.Open(filePath, FileMode.Create)))
+                {
+                    writer.Write(m_buffer, 0, size);
+                }
             }
             catch (Exception e)
             {
-                MyLog.WARNING.WriteLine("Memory block saving failed (" + memoryBlock.Owner.Name + "." + memoryBlock.Name + "): " + e.Message);
+                MyLog.WARNING.WriteLine("Memory block saving failed (node: {0} (id: {1}), block: {2}): {3}", memoryBlock.Owner.Name,
+                    memoryBlock.Owner.Id, memoryBlock.Name, e.Message);
             } 
         }
     }

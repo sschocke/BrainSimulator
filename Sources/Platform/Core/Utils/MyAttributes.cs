@@ -1,9 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace GoodAI.Core.Utils
 {
@@ -13,12 +8,14 @@ namespace GoodAI.Core.Utils
         public bool OneShot { get; set; }
         public int Order { get; set; }
         public bool Disabled { get; set; }
+        public bool DesignTime { get; set; }
 
         public MyTaskInfoAttribute()
         {
             OneShot = false;
             Order = 0;
             Disabled = false;
+            DesignTime = false;
         }
     }
 
@@ -89,5 +86,16 @@ namespace GoodAI.Core.Utils
     public class MyUnmanagedAttribute : Attribute { }    
 
     [AttributeUsage(AttributeTargets.Property)]
-    public class MyBrowsableAttribute : Attribute { }
+    public class MyBrowsableAttribute : Attribute 
+    {
+        public bool Browsable { get; protected set; }
+
+        public MyBrowsableAttribute(bool browsable = true)
+        {
+            Browsable = browsable;
+        }
+    }
+
+    [AttributeUsage(AttributeTargets.Property)]
+    public class DynamicBlockAttribute : Attribute { }
 }

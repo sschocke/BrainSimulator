@@ -1,29 +1,21 @@
-﻿using GoodAI.Core;
+﻿using GoodAI.BrainSimulator.Utils;
+using GoodAI.Core.Execution;
+using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
-using GoodAI.Core.Task;
 using GoodAI.Core.Observers;
-using GoodAI.BrainSimulator.Utils;
-using ManagedCuda;
-using ManagedCuda.BasicTypes;
+using GoodAI.Core.Utils;
 using ManagedCuda.VectorTypes;
+using OpenTK;
+using OpenTK.Graphics;
 using OpenTK.Graphics.OpenGL;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Data;
 using System.Drawing;
+using System.IO;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using WeifenLuo.WinFormsUI.Docking;
-using GoodAI.Core.Utils;
-using OpenTK;
-using GoodAI.Core.Execution;
-using OpenTK.Graphics;
-using System.IO;
-using System.Security.AccessControl;
-using GoodAI.Core.Memory;
 
 namespace GoodAI.BrainSimulator.Forms
 {
@@ -46,7 +38,7 @@ namespace GoodAI.BrainSimulator.Forms
             Observer = observer;            
             observer.TriggerReset();
 
-            Text = MyProject.ShortenNodeTypeName(observer.GetType()) + ": " + observer.GetTargetName(declaredOwner);
+            Text = observer.GetTargetName(declaredOwner);
         }
 
         protected virtual void ObserverForm_Load(object sender, EventArgs e)
@@ -71,6 +63,11 @@ namespace GoodAI.BrainSimulator.Forms
         }
 
         void ObserverForm_Activated(object sender, EventArgs e)
+        {
+            FocusWindow();
+        }
+
+        public void FocusWindow()
         {
             foreach (GraphLayoutForm graphView in m_mainForm.GraphViews.Values)
             {
@@ -160,8 +157,19 @@ namespace GoodAI.BrainSimulator.Forms
             if (!this.IsDisposed)
             {
                 peekLabel.Visible = false;
-                Observer.UpdateFrame(simulationStep);
-                glControl.Invalidate();
+
+                try
+                {
+                    Observer.UpdateFrame(simulationStep);
+                }
+                catch (Exception exc)
+                {
+                    MyLog.ERROR.WriteLine("Observer update failed: " + exc.Message);
+                }
+                finally
+                {
+                    glControl.Invalidate();
+                }
 
                 if (Observer.AutosaveSnapshop)
                 {
@@ -358,12 +366,33 @@ namespace GoodAI.BrainSimulator.Forms
                     int py = (int)pixelPos.y;
                     int index = py * Observer.TextureWidth + px;
 
-                    float result = float.NaN;
-
-                    mbObserver.Target.GetValueAt(ref result, index);
+                    if (index >= mbObserver.Target.Count)
+                        return;
 
                     peekLabel.Visible = true;
-                    peekLabel.Text = mbObserver.Target.Name + "[" + index + "] = " + result.ToString("0.0000");
+
+                    float result = 0;
+                    mbObserver.Target.GetValueAt(ref result, index);
+
+                    string formattedValue;
+                    if (mbObserver.Method == RenderingMethod.Raw)
+                    {
+                        IEnumerable<string> channels = BitConverter.GetBytes(result).Reverse()  // Get the byte values.
+                            .Select(channel => channel.ToString())
+                            .Select(channel => new String(' ', 3 - channel.Length) + channel);  // Indent with spaces.
+
+                        // Zip labels and values, join with a separator.
+                        formattedValue = String.Join(", ", "ARGB".Zip(channels, (label, channel) => label + ":" + channel));
+                    }
+                    else
+                    {
+                        formattedValue = result.ToString("0.0000");
+                    }
+
+                    // Show coordinates or index.
+                    string formattedIndex = mbObserver.ShowCoordinates ? px + ", " + py : index.ToString();
+
+                    peekLabel.Text = mbObserver.Target.Name + @"[" + formattedIndex + @"] = " + formattedValue;
                 }
             }
         }

@@ -1,28 +1,16 @@
-﻿using GoodAI.Core.Memory;
+﻿using GoodAI.Core;
+using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
+using GoodAI.Core.Observers; // Because of the keyboard...
 using GoodAI.Core.Task;
-using GoodAI.Modules.Transforms;
 using GoodAI.Core.Utils;
-using ManagedCuda;
-using ManagedCuda.BasicTypes;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using YAXLib;
-
-using ManagedCuda.VectorTypes;
-
-
-
-
+using GoodAI.Modules.Transforms;
 //---- observers
 using GoodAI.Modules.Vision;
-using OpenTK.Input;
-using GoodAI.Core;
-using GoodAI.Core.Observers; // Because of the keyboard...
+using ManagedCuda.BasicTypes;
+using System;
+using System.ComponentModel;
+using YAXLib;
 
 namespace GoodAI.Modules.Vision
 {
@@ -226,10 +214,10 @@ namespace GoodAI.Modules.Vision
             private MyCudaKernel m_kernel_UpdateCC_XY;
             private MyCudaKernel m_kernel_UpdateXY_basedOnTheBrainsMovement;
 
-            private MyCudaKernel m_dotKernel;
+            private MyProductKernel<float> m_dotKernel;
             private MyCudaKernel m_mulKernel;
             private MyCudaKernel m_matMultpl;
-            private MyCudaKernel m_minIdxKernel;
+            private MyReductionKernel<float> m_minIdxKernel;
 
 
 
@@ -264,7 +252,7 @@ namespace GoodAI.Modules.Vision
                 m_kernel_UpdateCC_XY.SetupExecution(Owner.ObjectXY.Count);
 
 
-                m_dotKernel = MyReductionFactory.Kernel(nGPU, MyReductionFactory.Mode.f_DotProduct_f);
+                m_dotKernel = MyKernelFactory.Instance.KernelProduct<float>(Owner, nGPU, ProductMode.f_DotProduct_f);
                 m_mulKernel = MyKernelFactory.Instance.Kernel(nGPU, @"Transforms\TransformKernels", "PolynomialFunctionKernel");
                 m_mulKernel.SetupExecution(Owner.DescCount);
 
@@ -272,7 +260,7 @@ namespace GoodAI.Modules.Vision
                 m_matMultpl.GridDimensions = new ManagedCuda.VectorTypes.dim3(1, Owner.DescCount);
                 m_matMultpl.BlockDimensions = new ManagedCuda.VectorTypes.dim3(1, 1);
 
-                m_minIdxKernel = MyReductionFactory.Kernel(nGPU, MyReductionFactory.Mode.f_MinIdx_ff);
+                m_minIdxKernel = MyKernelFactory.Instance.KernelReduction<float>(Owner, nGPU, ReductionMode.f_MinIdx_ff);
 
                 m_kernel_UpdateXY_basedOnTheBrainsMovement = MyKernelFactory.Instance.Kernel(nGPU, @"Vision\KMeansWM", "ApplyBrainsMovement");
                 m_kernel_UpdateCC_XY.SetupExecution(Owner.MaxClusters);
@@ -334,7 +322,8 @@ namespace GoodAI.Modules.Vision
             private void NormalizeVector(MyMemoryBlock<float> Vec, int dim ,int id_start=0){
                 CUdeviceptr VecDevPtr = Vec.GetDevicePtr(0,id_start * dim);
 
-                m_dotKernel.Run(Owner.TempVal, 0, VecDevPtr, VecDevPtr, dim);
+                //ZXC m_dotKernel.Run(Owner.TempVal, 0, VecDevPtr, VecDevPtr, dim, /* distributed: */ 0);
+                m_dotKernel.Run(Owner.TempVal, VecDevPtr, VecDevPtr, dim);
                 Owner.TempVal.SafeCopyToHost();
                 float length = (float)Math.Sqrt(Owner.TempVal.Host[0]);
 
@@ -547,12 +536,11 @@ namespace GoodAI.Modules.Observers
                 m_ker = MyKernelFactory.Instance.Kernel(MyKernelFactory.Instance.DevCount - 1, @"Vision\KMeansWM", "FocuserInputObserver");
                 m_ker.SetupExecution(TextureWidth * TextureHeight);
 
-                // FocuserInputObserver(float* values, float* pupilControl, int id_pupil , int inputWidth, int inputHeight, unsigned int* pixels, float color)
-                m_ker.Run(Target.Image, Target.ClusCentersXY, 4, TextureWidth, TextureHeight, VBODevicePointer, 0.0f);
-                m_ker.Run(Target.Image, Target.ClusCentersXY, 3, TextureWidth, TextureHeight, VBODevicePointer, 0.1f);
-                m_ker.Run(Target.Image, Target.ClusCentersXY, 2, TextureWidth, TextureHeight, VBODevicePointer, 0.2f);
-                m_ker.Run(Target.Image, Target.ClusCentersXY, 1, TextureWidth, TextureHeight, VBODevicePointer, 0.3f);
-                m_ker.Run(Target.Image, Target.ClusCentersXY, 0, TextureWidth, TextureHeight, VBODevicePointer, 0.4f);                
+                m_ker.Run(Target.Image, Target.ClusCentersXY.GetDevicePtr(Target, 4 * Target.ClusCentersXY.ColumnHint), TextureWidth, TextureHeight, VBODevicePointer, 0.0f,0);
+                m_ker.Run(Target.Image, Target.ClusCentersXY.GetDevicePtr(Target, 3 * Target.ClusCentersXY.ColumnHint), TextureWidth, TextureHeight, VBODevicePointer, 0.1f,0);
+                m_ker.Run(Target.Image, Target.ClusCentersXY.GetDevicePtr(Target, 2 * Target.ClusCentersXY.ColumnHint), TextureWidth, TextureHeight, VBODevicePointer, 0.2f,0);
+                m_ker.Run(Target.Image, Target.ClusCentersXY.GetDevicePtr(Target, 1 * Target.ClusCentersXY.ColumnHint), TextureWidth, TextureHeight, VBODevicePointer, 0.3f,0);
+                m_ker.Run(Target.Image, Target.ClusCentersXY.GetDevicePtr(Target, 0 * Target.ClusCentersXY.ColumnHint), TextureWidth, TextureHeight, VBODevicePointer, 0.4f,0);
             }
         }
 

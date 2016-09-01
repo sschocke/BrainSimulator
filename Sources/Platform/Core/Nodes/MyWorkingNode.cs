@@ -3,16 +3,12 @@ using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
-using YAXLib;
-using System.Diagnostics;
-using System.ComponentModel;
-using GoodAI.Core.Signals;
-using System.Drawing.Design;
 using GoodAI.Core.Execution;
+using YAXLib;
 
 namespace GoodAI.Core.Nodes
 {
@@ -21,20 +17,55 @@ namespace GoodAI.Core.Nodes
         void CreateTasks();
     }
 
+    /// <summary>
+    /// This encapsulates a task group.
+    /// </summary>
+    public class TaskGroup
+    {
+        public string GroupName { get; private set; }
+        public MyWorkingNode Owner { get; private set; }
+
+        public TaskGroup(MyWorkingNode owner, string groupName)
+        {
+            GroupName = groupName;
+            Owner = owner;
+            Tasks = new List<MyTask>();
+        }
+
+        public List<MyTask> Tasks { get; private set; }
+
+        public MyTask GetTaskByName(string value)
+        {
+            return Tasks.FirstOrDefault(task => task.Name == value);
+        }
+
+        public void DisableAll()
+        {
+            foreach (MyTask task in Tasks.Where(task => task.Enabled))
+                task.Enabled = false;
+        }
+    }
+
     public abstract class MyWorkingNode : MyNode
     {
+
+        public virtual void Cleanup()
+        {
+
+        }
+
         #region Persistance
 
         [YAXSerializableField, YAXAttributeForClass]
-        [MyBrowsable, Category("\tPersistance"), ReadOnly(true)]
+        [MyBrowsable, Category("\t\tPersistance"), ReadOnly(true)]
         public bool LoadOnStart { get; set; }
 
         [YAXSerializableField, YAXAttributeForClass]
-        [MyBrowsable, Category("\tPersistance"), ReadOnly(true)]
+        [MyBrowsable, Category("\t\tPersistance"), ReadOnly(true)]
         public bool SaveOnStop { get; set; }
 
         [YAXSerializableField(DefaultValue = ""), YAXCustomSerializer(typeof(MyPathSerializer))]
-        [MyBrowsable, Category("\tPersistance"), Editor]        
+        [MyBrowsable, Category("\t\tPersistance"), Editor]        
         public string DataFolder { get; set; }
         #endregion
 
@@ -44,9 +75,10 @@ namespace GoodAI.Core.Nodes
 
         public override int OutputBranches
         {
-            get { return m_outputs != null ? m_outputs.Length : 0; }
+            get { return base.OutputBranches; }
             set
             {
+                base.OutputBranches = value;
                 m_outputs = new MyAbstractMemoryBlock[value];
             }
         }
@@ -138,12 +170,20 @@ namespace GoodAI.Core.Nodes
         }
 
         public void EnableFirstTask()
-        {          
+        {
             if (m_tasks.Count > 0)
             {
                 (GetInfo().TaskOrder[0].GetValue(this) as MyTask).Enabled = true;                
             }
-        }        
+        }   
+     
+        public void EnableDefaultTasks()
+        {
+            foreach (MyTask task in m_tasks.Values.Reverse())
+            {
+                task.Enabled = task.EnabledByDefault;
+            }
+        }
 
         public void EnableAllTasks()
         {            
@@ -186,16 +226,33 @@ namespace GoodAI.Core.Nodes
                     MyLog.ERROR.WriteLine("Automated task creation failed: " + e.Message);
                 }
             }
+
+            InitializeTaskGroups();
+        }
+
+        private void InitializeTaskGroups()
+        {
+            TaskGroups.Clear();
+
+            foreach (var task in m_tasks.Values.Where(task => !string.IsNullOrEmpty(task.TaskGroupName)))
+            {
+                TaskGroup group;
+                if (!TaskGroups.TryGetValue(task.TaskGroupName, out group))
+                {
+                    group = new TaskGroup(this, task.TaskGroupName);
+                    TaskGroups[group.GroupName] = group;
+                }
+
+                group.Tasks.Add(task);
+            }
         }
 
         internal void FinalizeTasksDeserialization()
         {
             //to prevent nodegroup deserialization errors
             if (m_tasks == null)
-            {
                 m_tasks = new Dictionary<string, MyTask>();
-            }
-            
+
             //compatibility issues (no PropertyName attributes inside brain file Tasks sections)
             Dictionary<string, PropertyInfo> taskTypeTable = new Dictionary<string, PropertyInfo>();
             foreach (PropertyInfo taskProperty in GetInfo().KnownTasks.Values)
@@ -243,23 +300,50 @@ namespace GoodAI.Core.Nodes
             {
                 MyTask task = taskProperty.GetValue(this) as MyTask;
 
-                if (task != null && !m_tasks.ContainsKey(taskProperty.Name))
+                if (task != null)
                 {
-                    m_tasks[taskProperty.Name] = task;
+                    if (!m_tasks.ContainsKey(taskProperty.Name))
+                    {
+                        m_tasks[taskProperty.Name] = task;
+                    }
+
+                    //enable all design time tasks regardless of if they were in brain file or not
+                    if (task.DesignTime)
+                    {
+                        task.Enabled = true;
+                    }                    
                 }
             }
+
+            InitializeTaskGroups();
         }
 
         #endregion
 
+        #region Task groups
+
+        public Dictionary<string, TaskGroup> TaskGroups { get; private set; }
+
+        #endregion
+
+        public MyExecutionBlock ExecutionBlock { get; set; }
+
+        /// <summary>
+        /// This allows the node implementations to react to the simulation's state.
+        /// This is useful for e.g. resource management.
+        /// </summary>
+        public virtual void OnSimulationStateChanged(MySimulationHandler.StateEventArgs args)
+        {
+        }
+
         internal protected MyWorkingNode()
         {
             m_tasks = new Dictionary<string, MyTask>();
+            TaskGroups = new Dictionary<string, TaskGroup>();
 
-            if (this is IMyCustomTaskFactory)
-            {
-                (this as IMyCustomTaskFactory).CreateTasks();
-            }
+            var factory = this as IMyCustomTaskFactory;
+            if (factory != null)
+                factory.CreateTasks();
 
             FinalizeTaskCreation();
         }
@@ -278,14 +362,18 @@ namespace GoodAI.Core.Nodes
                 {
                     validator.AddInfo(this, "Node will load data from user defined folder: " + DataFolder);
                 }
-                else if (validator.Simulation.LoadAllNodesData)
+                else if (validator.Simulation.LoadAllNodesData && ! (String.IsNullOrEmpty(validator.Simulation.GlobalDataFolder)))
                 {
                     validator.AddInfo(this, "Node will load data from user defined folder: "
                         + validator.Simulation.GlobalDataFolder + "\\" + MyMemoryBlockSerializer.GetNodeFolder(this));
                 }
+                else if (validator.Simulation.LoadAllNodesData && (String.IsNullOrEmpty(validator.Simulation.GlobalDataFolder)))
+                {
+                    validator.AddInfo(this, "Node will load data from temporal storage.");
+                }
                 else
                 {
-                    validator.AddError(this, "LoadOnStart is active and no temporal data is available. DataFolder must be defined");
+                    validator.AddWarning(this, "LoadOnStart is active but no temporal data and no local or global data folder is set. Data will NOT be loaded.");
                 }
             }
 

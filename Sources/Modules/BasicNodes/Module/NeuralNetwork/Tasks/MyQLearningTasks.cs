@@ -1,16 +1,10 @@
-﻿using GoodAI.Core;
-using GoodAI.Modules.NeuralNetwork.Group;
-using GoodAI.Modules.NeuralNetwork.Layers;
-using GoodAI.Modules.RBM;
+﻿using GoodAI.Core.Nodes;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
-using ManagedCuda.BasicTypes;
-using System;
-using System.Collections.Generic;
+using GoodAI.Modules.NeuralNetwork.Group;
+using GoodAI.Modules.NeuralNetwork.Layers;
 using System.ComponentModel;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
 
 namespace GoodAI.Modules.NeuralNetwork.Tasks
@@ -43,46 +37,36 @@ namespace GoodAI.Modules.NeuralNetwork.Tasks
 
         public MyQLearningTask() { } //parameterless constructor
 
-        public override void Init(int nGPU) { }
+        public override void Init(int nGPU)
+        {
+
+        }
 
         public override void Execute() //Task execution
         {
-            // backup outputs in host memory and find the best possible value
+            if (SimulationStep == 0)
+            {
+                Owner.Output.FillAll(0);
+            }
+
+            Owner.ParentNetwork.FirstTopologicalLayer.Input.CopyToMemoryBlock(Owner.TempInput, 0, 0, Owner.ParentNetwork.FirstTopologicalLayer.Input.Count);
             Owner.Output.SafeCopyToHost();
-            float maxValue = Owner.Output.Host.Max();
-
-            // backup network inputs in host memory
-            Owner.ParentNetwork.FirstLayer.Input.SafeCopyToHost();
-
-            // do a forward pass with the previous inputs
-            Owner.ParentNetwork.FirstLayer.Input.CopyFromMemoryBlock(Owner.PreviousInput, 0, 0, Owner.PreviousInput.Count);
-            Owner.ParentNetwork.FeedForward();
-
-            // set the target: q(s(t-1), a) -> reward(t-1) + q(s(t), maxarg(a)) * discountfactor // TODO: consider reward(t-1) vs reward(t) :: reward(t-1) is correct, but reward(t) works better with our implementation of breakout
-            Owner.Target.CopyFromMemoryBlock(Owner.Output, 0, 0, Owner.Neurons);
-            Owner.Target.SafeCopyToHost(); // manipulate at host
-            Owner.PreviousAction.SafeCopyToHost(); // manipulate at host
-            Owner.PreviousReward.SafeCopyToHost(); // manipulate at host
-            //float value = Owner.PreviousReward.Host[0] + maxValue;
+            Owner.Action.SafeCopyToHost();
             Owner.Reward.SafeCopyToHost();
-            float normalize = 0;
-            for (int a = 0; a < Owner.Neurons; a++)
-                normalize += Owner.PreviousAction.Host[a];
-            if (normalize > 0)
-            {
-                for (int a = 0; a < Owner.Neurons; a++)
-                    Owner.PreviousAction.Host[a] /= normalize;
-            }
-            else
-            {
-                for (int a = 0; a < Owner.Neurons; a++)
-                    Owner.PreviousAction.Host[a] = 1.0f / Owner.Neurons;
-            }
-            float value = Owner.Reward.Host[0] + maxValue;
+            Owner.Target.SafeCopyToHost();
+            Owner.PreviousOutput.SafeCopyToHost();
 
-            for (int a = 0; a < Owner.Neurons; a++)
+            float reward = Owner.Reward.Host[0];
+            float gamma = DiscountFactor;
+
+            for (int i = 0; i < Owner.Action.Count; ++i)
             {
-                float target = Owner.PreviousAction.Host[a] * (value * DiscountFactor) + (1 - Owner.PreviousAction.Host[a]) * Owner.Target.Host[a];
+                float target;
+                if (Owner.Action.Host[i] > 0.5)
+                    target = reward + gamma * Owner.Output.Host.Max();
+                else
+                    target = Owner.PreviousOutput.Host[i];
+
                 if (BindTarget)
                 {
                     if (target > BindUpper)
@@ -91,57 +75,90 @@ namespace GoodAI.Modules.NeuralNetwork.Tasks
                         target = BindLower;
                 }
 
-                Owner.Target.Host[a] = target;
+                Owner.Target.Host[i] = target;
+            }
+            Owner.Target.SafeCopyToDevice();
+
+            Owner.Output.CopyToMemoryBlock(Owner.PreviousOutput, 0, 0, Owner.Output.Count);
+
+
+            Owner.PreviousInput.CopyToMemoryBlock(Owner.ParentNetwork.FirstTopologicalLayer.Input, 0, 0, Owner.PreviousInput.Count);
+            Owner.TempInput.CopyToMemoryBlock(Owner.PreviousInput, 0, 0, Owner.TempInput.Count);
+            Owner.ParentNetwork.FeedForward();
+        }
+    }
+
+    /// <summary>Batched Q-Learning. Minibatches must be created from (S_t, S_{t+1}, A_t, R_{t+1}) tuples. 
+    /// <ul>
+    /// <li>S_t is state of the world in current state</li>
+    /// <li>S_{t+1} is the next state</li>
+    /// <li>A_t is the action agent did in S_t</li>
+    /// <li>R_{t+1} is the reward obtained in next state</li>
+    /// </ul> <br />
+    /// Input of the network is then S_now, S_t minibatch and S_{t+1} minibatch stacked together. S_now is current world state.<br />
+    /// BatchSize of NN group has to be set to 2 * X + 1 where X is BatchSize set at ReplayBuffer node.
+    /// </summary>
+    [Description("Batched QLearning"), MyTaskInfo(OneShot = false)]
+    public class MyQLearningBatchTask : MyTask<MyQLearningLayer>
+    {
+        // properties
+        [YAXSerializableField(DefaultValue = 0.99f)]
+        [MyBrowsable, Category("\tHyperParameters")]
+        public float DiscountFactor { get; set; }
+
+        public MyQLearningBatchTask() { } //parameterless constructor
+
+        public override void Init(int nGPU)
+        {
+
+        }
+
+        public override void Execute() //Task execution
+        {
+            if (SimulationStep == 0)
+            {
+                Owner.Output.FillAll(0);
             }
 
-            Owner.Target.SafeCopyToDevice(); // back to device
+            Owner.Output.SafeCopyToHost();
 
-            // copy reward to previous value
-            Owner.PreviousReward.CopyFromMemoryBlock(Owner.Reward, 0, 0, 1);
-        }
-    }
+            Owner.Output.CopyToMemoryBlock(Owner.SnowOutput, 0, 0, Owner.SnowOutput.Count);
+            Owner.Output.CopyToMemoryBlock(Owner.S0Output, Owner.SnowOutput.Count, 0, Owner.S0Output.Count);
+            Owner.Output.CopyToMemoryBlock(Owner.S1Output, Owner.SnowOutput.Count + Owner.S0Output.Count, 0, Owner.S1Output.Count);
 
-    /// <author>GoodAI</author>
-    /// <meta>ph</meta>
-    /// <status>Working</status>
-    /// <summary>The QLearning task sets and updates the values from the previous timestep.
-    /// <br></br>
-    /// This restores the values to the current timestep.
-    /// </summary>
-    [Description("Restore values"), MyTaskInfo(OneShot = false)]
-    public class MyRestoreValuesTask : MyTask<MyQLearningLayer>
-    {
-        public MyRestoreValuesTask() { } //parameterless constructor
+            Owner.Action.SafeCopyToHost();
+            Owner.S1Output.SafeCopyToHost();
+            Owner.Reward.SafeCopyToHost();
 
-        public override void Init(int nGPU) { }
+            // do not set target for current state
+            for (int i = 0; i < Owner.SnowOutput.Count; i++)
+            {
+                Owner.Target.Host[i] = float.NaN;
+            }
 
-        public override void Execute() //Task execution
-        {
-            // restore output values from host
-            Owner.Output.SafeCopyToDevice();
+            // set target for s0 states
 
-            // restore input values from host
-            Owner.ParentNetwork.FirstLayer.Input.SafeCopyToDevice();
-            Owner.PreviousInput.CopyFromMemoryBlock(Owner.ParentNetwork.FirstLayer.Input, 0, 0, Owner.PreviousInput.Count);
-        }
-    }
+            for (int b = 0; b < (Owner.ParentNetwork.BatchSize - 1) / 2; b++)
+            {
+                for (int i = 0; i < Owner.Actions; ++i)
+                {
+                    float target;
+                    if (Owner.Action.Host[b * Owner.Actions + i] > 0.5)
+                        target = Owner.Reward.Host[b] + DiscountFactor * Owner.S1Output.Host.Skip(b * Owner.Actions).Take(Owner.Actions).Max();
+                    else
+                        target = float.NaN;
 
-    /// <author>GoodAI</author>
-    /// <meta>ph</meta>
-    /// <status>Working</status>
-    /// <summary>Saves the action taken in the current timestep, to use in the QLearning algorithm in the next timestep
-    /// </summary>
-    [Description("Save action"), MyTaskInfo(OneShot = false)]
-    public class MySaveActionTask : MyTask<MyQLearningLayer>
-    {
-        public MySaveActionTask() { } //parameterless constructor
+                    Owner.Target.Host[Owner.SnowOutput.Count + b * Owner.Actions + i] = target;
+                }
+            }
 
-        public override void Init(int nGPU) { }
+            // do not set target for s1 states
+            for (int i = Owner.SnowOutput.Count + Owner.S0Output.Count; i < Owner.Output.Count; i++)
+            {
+                Owner.Target.Host[i] = float.NaN;
+            }
 
-        public override void Execute() //Task execution
-        {
-            // copy action to previous value
-            Owner.PreviousAction.CopyFromMemoryBlock(Owner.Action, 0, 0, Owner.Neurons);
+            Owner.Target.SafeCopyToDevice();
         }
     }
 }

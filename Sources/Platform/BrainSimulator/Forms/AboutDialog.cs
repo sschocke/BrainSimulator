@@ -1,11 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Drawing;
-using System.Linq;
+﻿using GoodAI.BrainSimulator.Utils;
+using System;
 using System.Reflection;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace GoodAI.BrainSimulator.Forms
@@ -116,8 +111,14 @@ namespace GoodAI.BrainSimulator.Forms
 
         private void labelCompanyLink_LinkClicked(object sender, LinkLabelLinkClickedEventArgs e)
         {
-            ProcessStartInfo sInfo = new ProcessStartInfo("http://www.goodai.com");
-            Process.Start(sInfo);
+            try
+            {
+                MyDocProvider.Navigate("http://www.goodai.com");
+            }
+            catch (Exception exc)
+            {
+                MessageBox.Show("Could not open link. " + exc.Message, ":-(", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
     }
 }

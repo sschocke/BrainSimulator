@@ -1,39 +1,42 @@
-﻿using GoodAI.Core.Observers;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using OpenTK;
-using OpenTK.Graphics.OpenGL;
-using OpenTK.Graphics;
-using System.Drawing;
-using BEPUphysics;
-using BEPUphysics.Entities;
-using BEPUphysics.Entities.Prefabs;
-using BEPUphysics.CollisionShapes.ConvexShapes;
+﻿using BEPUphysics;
 using BEPUphysics.BroadPhaseEntries.MobileCollidables;
 using BEPUphysics.CollisionShapes;
+using BEPUphysics.CollisionShapes.ConvexShapes;
+using BEPUphysics.Entities;
+using GoodAI.Core.Observers;
+using OpenTK;
+using OpenTK.Graphics.OpenGL;
+using System;
+using System.Drawing;
 
 namespace GoodAI.Modules.Motor
 {
     public class My3DWorldObserver : MyNodeObserver<My3DWorld>
     {
+        Space m_formerSpace;
+
         public My3DWorldObserver()
         {
-
         }
 
         protected override void Reset()
         {
             base.Reset();
 
+            m_formerSpace = Target.Space;
+
             Shapes.Add(new MyWorldShape(Target.Space));
         }
 
         protected override void Execute()
         {
-            
+            if (m_formerSpace != Target.Space)
+            {
+                m_formerSpace = Target.Space;
+
+                Shapes.Clear();
+                Shapes.Add(new MyWorldShape(Target.Space));
+            }
         }
     }
 
@@ -51,7 +54,7 @@ namespace GoodAI.Modules.Motor
 
             for (int i = 0; i < m_circlePoints.Length; i++)
             {
-                float a0 = i * dAngle;                
+                float a0 = i * dAngle;
                 m_circlePoints[i] = new Vector2((float)Math.Cos(i * dAngle), (float)Math.Sin(i * dAngle));
             }
         }
@@ -61,7 +64,7 @@ namespace GoodAI.Modules.Motor
             GL.Disable(EnableCap.Texture2D);
             GL.Enable(EnableCap.Lighting);
             GL.Enable(EnableCap.CullFace);
-            GL.CullFace(CullFaceMode.Back);            
+            GL.CullFace(CullFaceMode.Back);
 
             for (int i = 0; i < m_space.Entities.Count; i++)
             {
@@ -81,7 +84,7 @@ namespace GoodAI.Modules.Motor
                 }
 
                 GL.PushMatrix();
-                
+
                 GL.Scale(0.1f, 0.1f, 0.1f);
 
                 Matrix4 wt = entity.WorldTransform;
@@ -90,7 +93,7 @@ namespace GoodAI.Modules.Motor
                 RenderEntity(entity.CollisionInformation);
 
                 GL.PopMatrix();
-            }            
+            }
         }
 
         private void RenderEntity(EntityCollidable entity)
@@ -183,7 +186,7 @@ namespace GoodAI.Modules.Motor
         }
 
         private void RenderCylinder(float radius, float height)
-        {            
+        {
             float h2 = height * 0.5f;
             int steps = m_circlePoints.Length;
 
@@ -191,8 +194,8 @@ namespace GoodAI.Modules.Motor
 
             for (int i = 0; i <= steps; i++)
             {
-                float x0 = radius * m_circlePoints[i % steps].X;               
-                float z0 = radius * m_circlePoints[i % steps].Y;                
+                float x0 = radius * m_circlePoints[i % steps].X;
+                float z0 = radius * m_circlePoints[i % steps].Y;
 
                 GL.Normal3(x0, 0, z0);
                 GL.Vertex3(x0, -h2, z0);
@@ -256,7 +259,7 @@ namespace GoodAI.Modules.Motor
             for (int i = steps; i >= 0; i--)
             {
                 float x0 = radius * m_circlePoints[i % steps].X;
-                float z0 = radius * m_circlePoints[i % steps].Y;                
+                float z0 = radius * m_circlePoints[i % steps].Y;
 
                 GL.Normal3(x0, ny, z0);
                 GL.Vertex3(x0, -h2, z0);
@@ -267,7 +270,7 @@ namespace GoodAI.Modules.Motor
 
         private void RenderSphere(float radius)
         {
-            int steps = m_circlePoints.Length;            
+            int steps = m_circlePoints.Length;
 
             for (int j = 1; j < steps / 2 - 1; j++)
             {

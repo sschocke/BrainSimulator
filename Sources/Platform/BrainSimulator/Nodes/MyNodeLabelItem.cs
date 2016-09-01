@@ -1,17 +1,12 @@
 ﻿using GoodAI.Core.Nodes;
 using Graph.Items;
-using System;
-using System.Collections.Generic;
 using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace GoodAI.BrainSimulator.Nodes
 {
     internal class MyNodeLabelItem : NodeLabelItem
     {
-        protected MyNode m_target;
+        private readonly MyNode m_target;
 
         public MyNodeLabelItem(MyNode target, bool inputEnabled, bool outputEnabled) :
 			base("", inputEnabled, outputEnabled)
@@ -24,15 +19,15 @@ namespace GoodAI.BrainSimulator.Nodes
             get
             {
                 if (internalText != m_target.Name)
-                {                    
-                    internalText = m_target.Name;
-                    TextSize = Size.Empty;
+                {
+                    base.Text = m_target.Name;
                 }
+
                 return internalText;
             }
             set
             {
-                
+                // ignored
             }
         }
     }

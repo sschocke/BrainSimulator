@@ -4,11 +4,7 @@ using GoodAI.Core.Nodes;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
 
 namespace GoodAI.Modules.Testing
@@ -64,14 +60,10 @@ namespace GoodAI.Modules.Testing
         {
             Output.Count = OutputSize;
             Output.ColumnHint = ColumnHint;
-
-            if (PatternCount > 0)
-            {
-                RandomPool.Count = PatternCount * OutputSize;
-                RandomPool.ColumnHint = ColumnHint;
-                Label.Count = PatternCount / PatternGroups;
-                Label.ColumnHint = Label.Count;
-            }
+            RandomPool.Count = PatternCount * OutputSize;
+            RandomPool.ColumnHint = ColumnHint;
+            Label.Count = PatternCount / PatternGroups;
+            Label.ColumnHint = Label.Count;
         }
 
         /// <summary>

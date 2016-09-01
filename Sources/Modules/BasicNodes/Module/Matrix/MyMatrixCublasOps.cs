@@ -1,20 +1,10 @@
 ﻿using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
-using GoodAI.Core.Task;
-using GoodAI.Modules.Transforms;
 using GoodAI.Core.Utils;
 using ManagedCuda;
-using ManagedCuda.BasicTypes;
 using ManagedCuda.CudaBlas;
 using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using YAXLib;
 
-using GoodAI.Modules.Matrix;
 
 
 
@@ -65,7 +55,7 @@ namespace GoodAI.Modules.Matrix
             switch (operation)
             {
                 case MatOperation.Multiplication:  // vectors/matrices have to be always in the correct dimesions!
-                    if (BCount > 1 && ACount > 1 && BColumnHint == 1 && ACount / AColumnHint > 1 && BCount / BColumnHint == AColumnHint) //. A*vecB
+                    if (BCount > 1 && ACount >= 1 && BColumnHint == 1 && ACount / AColumnHint > 1 && BCount / BColumnHint == AColumnHint) //. A*vecB
                     {
                         MyCublasFactory.Instance.Gemv(Operation.Transpose,  // transpose beacuase it does Ax row wise if x is a row vector :D
                             AColumnHint, ACount / AColumnHint, 1.0f,
@@ -73,7 +63,7 @@ namespace GoodAI.Modules.Matrix
                             B, 1,
                             beta, Result, 1);
                     }
-                    else if (ACount > 1 && BCount > 1 && ACount / AColumnHint == 1 && BColumnHint > 1 && BCount / BColumnHint == AColumnHint)  // vecA*B
+                    else if (ACount >= 1 && BCount > 1 && ACount / AColumnHint == 1 && BColumnHint > 1 && BCount / BColumnHint == AColumnHint)  // vecA*B
                     {
                         MyCublasFactory.Instance.Gemv(Operation.NonTranspose,  // transpose beacuase it does Ax row wise if x is a row vector :D
                             BColumnHint, BCount / BColumnHint, 1.0f,
@@ -87,14 +77,28 @@ namespace GoodAI.Modules.Matrix
                     }
                     else if (ACount != 1 || BCount != 1)// A*B   matrix multiplication
                     {
+                        // Cublas is using fortran matrices.. thus tey have to be swapped such as described in: http://peterwittek.com/cublas-matrix-c-style.html
+                        int m = BColumnHint;
+                        int n = ACount / AColumnHint;
+                        int k = AColumnHint;
+                        int lda = BColumnHint;
+                        int ldb = AColumnHint;
+                        int ldc = ResultColumnHint;
                         MyCublasFactory.Instance.Gemm(Operation.NonTranspose, Operation.NonTranspose,
-                            ACount / AColumnHint, BColumnHint, AColumnHint, 1.0f,
-                            A, ACount / AColumnHint,
-                            B, BCount / BColumnHint,
-                            beta, Result, ResultColumnHint);
+                            m, n, k, 1.0f,
+                            B, lda,
+                            A, ldb,
+                            beta, Result, ldc);
                     }
                     break;
                 case MatOperation.DotProd:
+
+                    if (ACount != BCount || ResultCount != 1)
+                    {
+                        MyLog.Writer.WriteLine(MyLogLevel.ERROR, callee.Name + ": Inconsistent vector dimensions for MyMatrixCublasOps.");
+                        break;
+                    }
+
                     MyCublasFactory.Instance.Gemv(Operation.Transpose,  // transpose beacuase it does Ax row wise if x is a row vector :D
                        ACount, 1, 1.0f,
                        A, ACount,
@@ -146,11 +150,11 @@ namespace GoodAI.Modules.Matrix
             Result.Fill(.0f);
             switch (operation)
             {
-                case MatOperation.MinIndex:
+                case MatOperation.AbsMinIndex:
                     itmp = MyCublasFactory.Instance.Min(A.GetDevice(callee), 1);
                     Result.Fill((float)(itmp - 1));
                     break;
-                case MatOperation.MaxIndex:
+                case MatOperation.AbsMaxIndex:
                     itmp = MyCublasFactory.Instance.Max(A.GetDevice(callee), 1);
                     Result.Fill((float)(itmp - 1));
                     break;
@@ -208,7 +212,7 @@ namespace GoodAI.Modules.Matrix
 
         public static MatOperation AvailableOperations()
         {
-            return MatOperation.Multiplication | MatOperation.MinIndex | MatOperation.MaxIndex | MatOperation.DotProd | MatOperation.Norm2 | MatOperation.Normalize | MatOperation.Minus | MatOperation.Copy;
+            return MatOperation.Multiplication | MatOperation.AbsMinIndex | MatOperation.AbsMaxIndex | MatOperation.DotProd | MatOperation.Norm2 | MatOperation.Normalize | MatOperation.Minus | MatOperation.Copy;
         }
     }
 }

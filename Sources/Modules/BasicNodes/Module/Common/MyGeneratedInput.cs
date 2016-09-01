@@ -1,17 +1,14 @@
-﻿using GoodAI.Core.Memory;
+﻿using GoodAI.Core;
+using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
+using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
 using System;
-using System.ComponentModel;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using YAXLib;
-using GoodAI.Core.Task;
-using System.ComponentModel.DataAnnotations;
+using System.ComponentModel;
 using System.Globalization;
-using GoodAI.Core;
+using System.Linq;
+using YAXLib;
 
 namespace GoodAI.Modules.Common
 {
@@ -43,7 +40,16 @@ namespace GoodAI.Modules.Common
 
         [YAXSerializableField(DefaultValue = 1), YAXElementFor("IO")]
         [MyBrowsable, Category("I/O")]
-        public int OutputSize { get; set; }
+        public int OutputSize
+        {
+            get { return m_outputSize; }
+            set
+            {
+                m_outputSize = value;
+                UpdateOutput();
+            }
+        }
+        private int m_outputSize;
 
         [YAXSerializableField(DefaultValue = 1)]
         [MyBrowsable, Category("I/O")]
@@ -56,16 +62,17 @@ namespace GoodAI.Modules.Common
             get { return m_userInput; }
             set
             {
-                if (value.Length > 0)
-                {
-                    UserInput_parsed = value.Trim().Split(',', ' ').Select(a => float.Parse(a, CultureInfo.InvariantCulture)).ToList();
-                    Output.Count = UserInput_parsed.Count;
-                }
+                m_userDataList = (value.Length > 0)
+                    ? value.Trim().Split(',', ' ').Select(a => float.Parse(a, CultureInfo.InvariantCulture)).ToList()
+                    : null;
+
                 m_userInput = value;
+                UpdateOutput();
             }
         }
         private string m_userInput;
-        List<float> UserInput_parsed;// = new List<float>();
+
+        private List<float> m_userDataList;
 
         [YAXSerializableField(DefaultValue = MyGenerateType.Linear)]
         [MyBrowsable, Category("User Data Input")]
@@ -75,11 +82,7 @@ namespace GoodAI.Modules.Common
         {
             get
             {
-                if (GenerateType == MyGenerateType.Linear)
-                {
-                    return base.Description;
-                }
-                else if (GenerateType == MyGenerateType.UserData)
+                if (GenerateType == MyGenerateType.UserData)
                 {
                     if (UserInput.Length > 10)
                     {
@@ -92,36 +95,64 @@ namespace GoodAI.Modules.Common
                 {
                     return "SimulStep";
                 }
-                else
+                else if (GenerateType == MyGenerateType.SimulationStepFce)
                 {
                     return "SimulStepFce";
+                }
+                else if (GenerateType == MyGenerateType.Sine)
+                {
+                    return "Sine";
+                }
+                else
+                {
+                    return base.Description;
                 }
             }
         }
 
         public override void UpdateMemoryBlocks()
         {
-            Output.ColumnHint = ColumnHint > 0 ? ColumnHint : 1;
-            if (GenerateType == MyGenerateType.SimulationStepFce)
+            UpdateOutput();
+        }
+
+        private void UpdateOutput()
+        {
+            Output.ColumnHint = ColumnHint;
+
+            Output.Count = GetOutputSize();
+        }
+
+        private int GetOutputSize()
+        {
+            if ((GenerateType != MyGenerateType.Linear) && (GenerateType != MyGenerateType.UserData))
             {
-                OutputSize = 1;
+                return 1;
             }
-            Output.Count = OutputSize;
+            
             if (GenerateType == MyGenerateType.UserData)
             {
-                Output.Count = UserInput_parsed != null ? UserInput_parsed.Count : OutputSize;
+                return (m_userDataList != null) ? m_userDataList.Count : OutputSize;
             }
+
+            return OutputSize;
         }
 
         public override void Validate(MyValidator validator)
         {
             validator.AssertError(OutputSize > 0, this, "Invalid OutputSize, must be at least 1");
-            validator.AssertError(!(GenerateType == MyGenerateType.UserData && UserInput.Length == 0), this, "You need to enter some values to UserData");
+            validator.AssertError(GenerateType == MyGenerateType.Linear || GenerateType == MyGenerateType.SimulationStep || UserInput.Length != 0, this, "You need to enter some values to UserInput field");
         }
 
         public MyTransferTask GenerateInput { get; private set; }
 
-        /// <summary></summary>
+        /// <summary>Generates input. Possible methods are:<dl>
+        /// <dt><b>Linear</b></dt><dd>Set output to numbers spread evenly between <b>MinValue</b> and <b>MaxValue</b> (including) and shifts them each step by <b>ShiftSpeed</b> positions. If the output size is 1, MinValue will be set as output.</dd>
+        /// <dt><b>Sine</b></dt><dd>Sets first output element to sine of 2*Pi*SimulationStep*UserInput. Therefore first value in UserInput serves as inverse "sampling frequency". Setting it to 1 or 0.5 will give you just zeros while setting it to 0.01 will spread one sine period to 100 simulation steps.</dd>
+        /// <dt><b>Cosine</b></dt><dd>Sets first output element to cosine of 2*Pi*SimulationStep*UserInput. Therefore first value in UserInput serves as inverse "sampling frequency". Setting it to 1 will give you just ones while setting it to 0.01 will spread one cosine period to 100 simulation steps.</dd>
+        /// <dt><b>UserData</b></dt><dd>Data in node's <b>UserInput</b> are copied into output</dd>
+        /// <dt><b>SimulationStep</b></dt><dd>Output is set to current simulation step number</dd>
+        /// <dt><b>SimulationStepFce</b></dt><dd>Task cyclically iterates over node's UserInput and puts values from it to output</dd>
+        /// </dl></summary>
         [Description("Generate input")]
         public class MyTransferTask : MyTask<MyGenerateInput>
         {
@@ -164,17 +195,17 @@ namespace GoodAI.Modules.Common
                         m_kernel.Run(MinValue, MaxValue, Owner.Output, Owner.OutputSize, ShiftSpeed * SimulationStep);
                         break;
                     case MyGenerateType.Sine:
-                        Owner.Output.Host[0] = (float)Math.Sin(this.SimulationStep * 2 * Math.PI * Owner.UserInput_parsed[0]);
+                        Owner.Output.Host[0] = (float)Math.Sin(this.SimulationStep * 2 * Math.PI * Owner.m_userDataList[0]);
                         Owner.Output.SafeCopyToDevice();
                         break;
                     case MyGenerateType.Cosine:
-                        Owner.Output.Host[0] = (float)Math.Cos(this.SimulationStep * 2 * Math.PI * Owner.UserInput_parsed[0]);
+                        Owner.Output.Host[0] = (float)Math.Cos(this.SimulationStep * 2 * Math.PI * Owner.m_userDataList[0]);
                         Owner.Output.SafeCopyToDevice();
                         break;
                     case MyGenerateType.UserData:
-                        for (int a = 0; a < Owner.UserInput_parsed.Count; a++)
+                        for (int a = 0; a < Owner.m_userDataList.Count; a++)
                         {
-                            Owner.Output.Host[a] = Owner.UserInput_parsed[a];
+                            Owner.Output.Host[a] = Owner.m_userDataList[a];
                         }
                         Owner.Output.SafeCopyToDevice();
                         break;
@@ -183,8 +214,8 @@ namespace GoodAI.Modules.Common
                         Owner.Output.SafeCopyToDevice();
                         break;
                     case MyGenerateType.SimulationStepFce:
-                        int stepMod = (int)SimulationStep % Owner.UserInput_parsed.Count;
-                        Owner.Output.Host[0] = Owner.UserInput_parsed[stepMod];
+                        int stepMod = (int)SimulationStep % Owner.m_userDataList.Count;
+                        Owner.Output.Host[0] = Owner.m_userDataList[stepMod];
                         Owner.Output.SafeCopyToDevice();
                         break;
                 }

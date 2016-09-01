@@ -1,15 +1,10 @@
-﻿using GoodAI.Core.Memory;
+﻿using System;
+using GoodAI.Core.Memory;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
 using GoodAI.Modules.Transforms;
-using ManagedCuda;
 using ManagedCuda.BasicTypes;
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
 
 namespace GoodAI.Core.Nodes
@@ -22,7 +17,7 @@ namespace GoodAI.Core.Nodes
     ///   binary (AND, XOR,...), permutation, distance measurement or stacking the inputs.
     /// </summary>
     /// <description>This node is OBSOLETE and exists only because of the need for backward compatibility. It is to be removed in a future update.</description>
-    public class MyJoin : MyWorkingNode
+    public class MyJoin : MyWorkingNode, IMyVariableBranchViewNodeBase
     {
         [MyOutputBlock]
         public MyMemoryBlock<float> Output
@@ -31,7 +26,7 @@ namespace GoodAI.Core.Nodes
             set { SetOutput(0, value); }
         }
 
-        public int OutputSize
+        private int OutputSize
         {
             get { return Output.Count; }
             set { Output.Count = value; }
@@ -49,8 +44,32 @@ namespace GoodAI.Core.Nodes
             }
         }
 
-        [MyBrowsable, YAXSerializableField(DefaultValue = 0), YAXElementFor("IO")]
-        public int OutputColHint { get; set; }
+        [Obsolete("Use OutputDimensions please.")]
+        [YAXSerializableField(DefaultValue = 0), YAXElementFor("IO")]
+        private int OutputColHint { get; set; }
+
+        [MyBrowsable, Category("I/O"), Description("Comma separated dimensions, such as \"2, 3, *\".")]
+        [YAXSerializableField(DefaultValue = ""), YAXElementFor("IO")]
+        public string OutputDimensions
+        {
+            get
+            {
+                // backward compatible layer: use OutputColHint saved in the project
+                if (m_outputDimsHint.IsEmpty && OutputColHint > 0)
+                {
+                    m_outputDimsHint = new CustomDimensionsHint(OutputColHint);
+                    OutputColHint = 0;  // Don't use the old value next time.
+                }
+
+                return m_outputDimsHint.PrintSource();
+            }
+            set
+            {
+                m_outputDimsHint = CustomDimensionsHint.Parse(value);
+            }
+        }
+
+        private CustomDimensionsHint m_outputDimsHint;
 
         public int[] m_offsets = new int[0];
 
@@ -73,6 +92,8 @@ namespace GoodAI.Core.Nodes
 
             Modulo,
             Division_int,
+
+            Equal, // Warning: uses a strict equality comparison on floats
             /// DON'T CHANGE ORDERING OF THESE!!!!
 
             AddToIdcs,
@@ -83,7 +104,7 @@ namespace GoodAI.Core.Nodes
             CosineDistance,
             DistanceSquared,
 
-            MatMultiplication, /// Matrix mutliplication
+            MatMultiplication, /// Matrix multiplication
 
             //must be last
             StackInputs
@@ -130,11 +151,6 @@ namespace GoodAI.Core.Nodes
                 {
                     Output.ColumnHint = ai.ColumnHint;
                 }
-            }
-
-            if (OutputColHint > 0)
-            {
-                Output.ColumnHint = OutputColHint;
             }
 
             switch (Operation)
@@ -194,6 +210,13 @@ namespace GoodAI.Core.Nodes
                     }
                     break;
             }
+
+            TensorDimensions adjustedDims;
+
+            if(!m_outputDimsHint.TryToApply(Output.Dims, out adjustedDims) && !m_outputDimsHint.IsEmpty)
+                MyLog.WARNING.WriteLine("Join node '{0}': Could not apply OutputDimensions.", Name);  // TODO(Premek): Be specific.
+
+            Output.Dims = adjustedDims;  // Adjusted or original.
         }
 
         public override void Validate(MyValidator validator)
@@ -227,6 +250,10 @@ namespace GoodAI.Core.Nodes
                     validator.AssertError(InputBranches >= 2, this, "Must provide the Target vector and the idcs as the first two inputs");
                     validator.AssertError(GetInputSize(0) >= GetInputSize(1), this, "Target vector must be bigger than the idcs");
                     return;
+
+                default:
+                    validator.AssertError(InputBranches >= 2, this, "Operation needs at least two operands");
+                    break;
             }
 
             for (int i = 0; i < InputBranches; i++)
@@ -287,7 +314,7 @@ namespace GoodAI.Core.Nodes
             MyMemoryBlock<float> in0, in1, out0;
 
             private MyCudaKernel m_kernel;
-            private MyCudaKernel m_dotKernel;
+            private MyProductKernel<float> m_dotKernel;
             private MyCudaKernel m_mapToIdcsKernel;
 
             public override void Init(int nGPU)
@@ -314,7 +341,7 @@ namespace GoodAI.Core.Nodes
                         m_kernel.SetupExecution(in1.Count);
                         m_mapToIdcsKernel = MyKernelFactory.Instance.Kernel(nGPU, @"Common\CombineVectorsKernel", "MapToIdcs");
                         m_mapToIdcsKernel.SetupExecution(in1.Count);
-                        m_dotKernel = MyReductionFactory.Kernel(nGPU, MyReductionFactory.Mode.f_DotProduct_f);
+                        m_dotKernel = MyKernelFactory.Instance.KernelProduct<float>(Owner, nGPU, ProductMode.f_DotProduct_f);
                         break;
 
                     case MyJoinOperation.GatherFromIdcs:
@@ -325,11 +352,11 @@ namespace GoodAI.Core.Nodes
                     case MyJoinOperation.DotProduct:
                     case MyJoinOperation.DistanceSquared:
                         m_kernel.SetupExecution(in0.Count);
-                        m_dotKernel = MyReductionFactory.Kernel(nGPU, MyReductionFactory.Mode.f_DotProduct_f);
+                        m_dotKernel = MyKernelFactory.Instance.KernelProduct<float>(Owner, nGPU, ProductMode.f_DotProduct_f);
                         break;
 
                     case MyJoinOperation.CosineDistance:
-                        m_dotKernel = MyReductionFactory.Kernel(nGPU, MyReductionFactory.Mode.f_Cosine_f);
+                        m_dotKernel = MyKernelFactory.Instance.KernelProduct<float>(Owner, nGPU, ProductMode.f_Cosine_f);
                         break;
 
                     case MyJoinOperation.MatMultiplication:
@@ -354,7 +381,7 @@ namespace GoodAI.Core.Nodes
                             MyMemoryBlock<float> ai = Owner.GetInput(i);
                             if (ai != null)
                             {
-                                out0.CopyFromMemoryBlock(ai, 0, Owner.m_offsets[i], ai.Count);
+                                ai.CopyToMemoryBlock(out0, 0, Owner.m_offsets[i], ai.Count);
                             }
                         }
                         break;
@@ -375,7 +402,10 @@ namespace GoodAI.Core.Nodes
 
                         m_kernel.Run(in0, in2, temp, (int)MyJoinOperation.Permutation, in2.Count);
                         m_kernel.Run(in1, temp, temp, (int)MyJoinOperation.Addition, in1.Count);
-                        m_dotKernel.Run(temp, in1.Count, temp, temp, in1.Count);
+                        //ZCX m_dotKernel.Run(temp, in1.Count, temp, temp, in1.Count, /* distributed: */ 0);
+                        m_dotKernel.size = in1.Count;
+                        m_dotKernel.outOffset = in1.Count;
+                        m_dotKernel.Run(temp, temp, temp);
                         m_mapToIdcsKernel.Run(temp, temp.GetDevicePtr(Owner.GPU, in1.Count), in2, out0, in2.Count);
                         break;
 
@@ -385,12 +415,14 @@ namespace GoodAI.Core.Nodes
 
                     case MyJoinOperation.DistanceSquared:
                         m_kernel.Run(in0, in1, Owner.Temp, (int)MyJoinOperation.Subtraction, in0.Count, in1.Count);
-                        m_dotKernel.Run(out0, 0, Owner.Temp, Owner.Temp, Owner.Temp.Count);
+                        //ZXC m_dotKernel.Run(out0, 0, Owner.Temp, Owner.Temp, Owner.Temp.Count, /* distributed: */ 0);
+                        m_dotKernel.Run(out0, Owner.Temp, Owner.Temp);
                         break;
 
                     case MyJoinOperation.CosineDistance:
                     case MyJoinOperation.DotProduct:
-                        m_dotKernel.Run(out0, 0, in0, in1, in0.Count);
+                        //ZXC m_dotKernel.Run(out0, 0, in0, in1, in0.Count, /* distributed: */ 0);
+                        m_dotKernel.Run(out0, in0, in1);
                         break;
 
                     case MyJoinOperation.MatMultiplication:

@@ -1,14 +1,11 @@
-﻿using GoodAI.Core.Execution;
+﻿using GoodAI.BrainSimulator.UserSettings;
+using GoodAI.Core.Execution;
 using GoodAI.Core.Utils;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Data;
 using System.Drawing;
-using System.IO;
 using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using WeifenLuo.WinFormsUI.Docking;
 
@@ -19,7 +16,7 @@ namespace GoodAI.BrainSimulator.Forms
         private MainForm m_mainForm;
 
         private static int MAX_LINES = 1000;
-        private static int LINES_REMOVED_PER_CHECK = 50;
+        private static int ADDITIONAL_LINES_REMOVED_PER_CHECK = 50;
 
         private class TextBoxCache : MyLogWriter
         {
@@ -75,10 +72,25 @@ namespace GoodAI.BrainSimulator.Forms
             public void FlushCache()
             {
                 lock (m_builders)
-                {                    
+                {
+                    int caretPosition = 0;
+                    int currentTextLength = 0;
+
+                    if (!m_consoleForm.InvokeRequired)
+                    {
+                        caretPosition = m_consoleForm.CaretPosition;
+                        currentTextLength = m_consoleForm.TextLength;
+                    }
+
+                    bool written = false;
                     for (int i = 0; i < m_builders.Length; i++)
                     {
                         string text = m_builders[i].ToString();
+                        if (string.IsNullOrEmpty(text))
+                            continue;
+
+                        written = true;
+
                         m_builders[i].Clear();
 
                         if (m_consoleForm.InvokeRequired)
@@ -89,7 +101,10 @@ namespace GoodAI.BrainSimulator.Forms
                         {
                             m_consoleForm.AppendText(text, COLORS[i]);
                         }
-                    }                    
+                    }
+
+                    if (!m_consoleForm.InvokeRequired && written && caretPosition == currentTextLength)
+                        m_consoleForm.ScrollToCaret();
                 }
             }
 
@@ -99,6 +114,20 @@ namespace GoodAI.BrainSimulator.Forms
                 {
                     FlushCache();
                 }
+            }
+        }
+
+        private int TextLength
+        {
+            get { return textBox.TextLength; }
+        }
+
+        private int CaretPosition
+        {
+            get { return textBox.SelectionStart; }
+            set {
+                textBox.SelectionStart = value;
+                textBox.SelectionLength = 0;
             }
         }
 
@@ -177,13 +206,14 @@ namespace GoodAI.BrainSimulator.Forms
 
             logLevelStripComboBox.Items.AddRange(Enum.GetNames(typeof(MyLogLevel)));            
             logLevelStripComboBox.SelectedIndexChanged += logLevelStripComboBox_SelectedIndexChanged;
-            logLevelStripComboBox.SelectedIndex = Properties.Settings.Default.LogLevel;
+
+            logLevelStripComboBox.SelectedIndex = (int) AppSettings.GetInitialLogLevel();
         }
 
         void logLevelStripComboBox_SelectedIndexChanged(object sender, EventArgs e)
         {
             MyLog.Level = (MyLogLevel)logLevelStripComboBox.SelectedIndex;
-            Properties.Settings.Default.LogLevel = (int)MyLog.Level;
+            AppSettings.SaveSettings(settings => settings.LogLevel = (int)MyLog.Level);
         }
 
         void SimulationHandler_StateChanged(object sender, MySimulationHandler.StateEventArgs e)
@@ -193,7 +223,7 @@ namespace GoodAI.BrainSimulator.Forms
 
         void SimulationHandler_ProgressChanged(object sender, ProgressChangedEventArgs e)
         {
-            this.BeginInvoke((MethodInvoker)(() => UpdateConsole()));
+            this.BeginInvoke((MethodInvoker) UpdateConsole);
         }
 
         private void UpdateConsole()
@@ -210,8 +240,20 @@ namespace GoodAI.BrainSimulator.Forms
 
             if (textBox.Lines.Length > MAX_LINES)
             {
-                textBox.Lines = textBox.Lines.Skip(LINES_REMOVED_PER_CHECK).ToArray();
+                textBox.Lines = textBox.Lines.Skip(
+                        textBox.Lines.Length - MAX_LINES + ADDITIONAL_LINES_REMOVED_PER_CHECK
+                        ).ToArray();
             }
         }
+
+        private bool IsCaretAtTheEnd()
+        {
+            return textBox.SelectionStart == textBox.TextLength;
+        }
+
+        private void ScrollToCaret()
+        {
+            textBox.ScrollToCaret();
+        } 
     }
 }

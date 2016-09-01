@@ -22,13 +22,13 @@ At each time step, the agent:
  * finds the utility of the best action in the new state: $\underset{a}{max} Q_t(s_{t+1},a)$
  * updates the $\mathbf{Q}(s_t,a_t)$ value according to the equation above.  
 
-We can see that the equation *spreads the reward one step back*. The learning is is configured by parameters $\alpha$ (learning rate) and $\gamma$ (how strongly is the reward spread back ~ how far in the future agent sees).  
+We can see that the equation *spreads the reward one step back*. The learning is configured by parameters $\alpha$ (learning rate) and $\gamma$ (how strongly is the reward spread back ~ how far in the future agent sees).  
 
 The following figure shows an [illustration of](https://www.dropbox.com/s/30vq3ipduc9ghd5/jvitkudt2011.pdf?dl=0) **learned strategy** by the Q-Learning algorithm (actions: $\mathbf{A} = \lbrace Left, Right, Down, Up, Eat \rbrace$ , positions: $\mathbf{S}= \lbrace x,y \rbrace$). On the right there is a best action at each position, on the left side there is utility value of the best action in the position. Agent receives the reward it it executes action *Eat* at a given position. The nearer the reward, the higher the action utilities are.
 
 ![Example of Learned Strategy with the utility value](discreteqlearning/utility.PNG)
 
-Our discrete Q-Learning Node uses also **Eligibility trace**, which enables the system to update [multiple](http://webdocs.cs.ualberta.ca/~sutton/book/ebook/Node78.html) $\mathbf{Q}$-values at one time-step. This improvement is often called $\mathbf{Q(\lambda)}$ and greatly speeds-up learning. The parameter $\lambda$ defines how [strongly is current difference projected back](http://webdocs.cs.ualberta.ca/~sutton/book/ebook/Node82.html). The higher the parameter, the faster the learning. But too high value can destabilize the learning convergence.
+Our discrete Q-Learning Node uses also **Eligibility trace**, which enables the system to update [multiple](http://webdocs.cs.ualberta.ca/~sutton/book/ebook/node78.html) $\mathbf{Q}$-values at one time-step. This improvement is often called $\mathbf{Q(\lambda)}$ and greatly speeds-up learning. The parameter $\lambda$ defines how [strongly is current difference projected back](http://webdocs.cs.ualberta.ca/~sutton/book/ebook/node82.html). The higher the parameter, the faster the learning. But too high value can destabilize the learning convergence.
 
 
 ### <a name="qlearningNode"></a>Discrete Q-Learning Node

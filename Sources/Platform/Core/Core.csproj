@@ -12,7 +12,6 @@
     <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <SolutionDir Condition="$(SolutionDir) == '' Or $(SolutionDir) == '*Undefined*'">..\</SolutionDir>
-    <RestorePackages>true</RestorePackages>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <PlatformTarget>AnyCPU</PlatformTarget>
@@ -66,38 +65,87 @@
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="CudaRand">
-      <HintPath>..\..\..\BinaryLibs\GoodAiPlatformLibs\ManagedCuda\CudaRand.dll</HintPath>
+    <Reference Include="CudaBlas, Version=7.5.7.0, Culture=neutral, PublicKeyToken=539d54d12e99fedb, processorArchitecture=AMD64">
+      <HintPath>..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\CudaBlas.dll</HintPath>
+      <Private>True</Private>
     </Reference>
-    <Reference Include="ManagedCuda">
-      <HintPath>..\..\..\BinaryLibs\GoodAiPlatformLibs\ManagedCuda\ManagedCuda.dll</HintPath>
+    <Reference Include="CudaFFT, Version=7.5.7.0, Culture=neutral, PublicKeyToken=f066edfa1acb2f23, processorArchitecture=AMD64">
+      <HintPath>..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\CudaFFT.dll</HintPath>
+      <Private>True</Private>
     </Reference>
-    <Reference Include="OpenTK">
-      <HintPath>..\..\..\BinaryLibs\GoodAiPlatformLibs\OpenTK\OpenTK.dll</HintPath>
+    <Reference Include="CudaRand, Version=7.5.7.0, Culture=neutral, PublicKeyToken=fe981579f4e9a066, processorArchitecture=AMD64">
+      <HintPath>..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\CudaRand.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="CudaSolve, Version=7.5.7.0, Culture=neutral, processorArchitecture=AMD64">
+      <HintPath>..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\CudaSolve.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="CudaSparse, Version=7.5.7.0, Culture=neutral, PublicKeyToken=f65ee2ae6b331585, processorArchitecture=AMD64">
+      <HintPath>..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\CudaSparse.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="ManagedCuda, Version=7.5.7.0, Culture=neutral, PublicKeyToken=242d898828717aa0, processorArchitecture=MSIL">
+      <HintPath>..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\ManagedCuda.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="NPP, Version=7.5.7.0, Culture=neutral, processorArchitecture=AMD64">
+      <HintPath>..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\NPP.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="NVRTC, Version=7.5.7.0, Culture=neutral, processorArchitecture=AMD64">
+      <HintPath>..\..\packages\ManagedCuda-75-x64.7.5.7\lib\net45\x64\NVRTC.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="OpenTK, Version=1.1.0.0, Culture=neutral, PublicKeyToken=bad199fe84eb3df4, processorArchitecture=MSIL">
+      <HintPath>..\..\packages\OpenTK.1.1.2225.0\lib\net20\OpenTK.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="SimpleInjector, Version=3.1.2.0, Culture=neutral, PublicKeyToken=984cb50dea722e99, processorArchitecture=MSIL">
+      <HintPath>..\..\packages\SimpleInjector.3.1.2\lib\net45\SimpleInjector.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="System" />
+    <Reference Include="System.Collections.Immutable, Version=1.1.37.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a, processorArchitecture=MSIL">
+      <HintPath>..\..\packages\System.Collections.Immutable.1.1.37\lib\portable-net45+win8+wp8+wpa81\System.Collections.Immutable.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+    <Reference Include="System.Reflection" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
     <Reference Include="System.Data" />
     <Reference Include="System.Xml" />
-    <Reference Include="YAXLib">
-      <HintPath>..\..\..\BinaryLibs\GoodAiPlatformLibs\YAXLib\YAXLib.dll</HintPath>
-    </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Configuration\CoreContainerConfiguration.cs" />
     <Compile Include="Configuration\MyBaseConversion.cs" />
     <Compile Include="Configuration\MyModuleConfig.cs" />
     <Compile Include="Configuration\MyNodeConfig.cs" />
+    <Compile Include="Dashboard\Dashboard.cs" />
+    <Compile Include="Dashboard\DashboardProperty.cs" />
+    <Compile Include="Dashboard\DashboardPropertyFactory.cs" />
+    <Compile Include="Dashboard\ProxyProperty.cs" />
+    <Compile Include="Dashboard\ProxyPropertyDescriptor.cs" />
     <Compile Include="Execution\MyExecutionBlock.cs" />
+    <Compile Include="Execution\MyProjectRunner.cs" />
     <Compile Include="Execution\MySimulation.cs" />
     <Compile Include="Execution\MySimulationHandler.cs" />
     <Compile Include="Execution\MyExecutionPlanner.cs" />
     <Compile Include="Execution\MyPartitionStrategy.cs" />
     <Compile Include="Execution\MyTaskExecutor.cs" />
+    <Compile Include="Memory\CustomDimensionsHint.cs" />
+    <Compile Include="Memory\MemBlockAttribute.cs" />
+    <Compile Include="Memory\MemoryBlockMetadata.cs" />
     <Compile Include="Memory\MemoryBlockSerializer.cs" />
+    <Compile Include="Memory\TensorDimensions.cs" />
+    <Compile Include="Memory\TensorDimensionsBase.cs" />
+    <Compile Include="Nodes\DeviceInput.cs" />
+    <Compile Include="Nodes\IModelChanger.cs" />
+    <Compile Include="Nodes\MyScriptableNode.cs" />
     <Compile Include="Nodes\MyConditionalGroup.cs" />
     <Compile Include="Nodes\MyDataGate.cs" />
     <Compile Include="Nodes\MyGateInput.cs" />
@@ -105,12 +153,21 @@
     <Compile Include="Nodes\MyNodeInfo.cs" />
     <Compile Include="Nodes\MyTestingWorld.cs" />
     <Compile Include="Nodes\MyUserInput.cs" />
+    <Compile Include="Nodes\IMyVariableBranchViewNodeBase.cs" />
+    <Compile Include="Dashboard\TaskGroupConverter.cs" />
+    <Compile Include="Observers\MatrixObserver.cs" />
+    <Compile Include="Observers\MyObserverHelpers.cs" />
+    <Compile Include="Observers\TimePlotObserver.cs" />
     <Compile Include="Observers\MyMemoryBlockEditor.cs" />
     <Compile Include="Observers\MyHistogramObserver.cs" />
     <Compile Include="Observers\MyShape.cs" />
     <Compile Include="Observers\MySpikeRasterObserver.cs" />
+    <Compile Include="Observers\MyTextObserver.cs" />
+    <Compile Include="Project\ProjectLoader.cs" />
     <Compile Include="Transforms\MyReduction.cs" />
     <Compile Include="Utils\BidirHashtable.cs" />
+    <Compile Include="Utils\MyPropertyChangedEventArgs.cs" />
+    <Compile Include="Utils\EnumerableExtensions.cs" />
     <Compile Include="Utils\MyGeneralSignals.cs" />
     <Compile Include="Utils\MyHierarchicalOrdering.cs" />
     <Compile Include="Utils\MyPathSerializer.cs" />
@@ -157,6 +214,7 @@
     <None Include="App.config">
       <SubType>Designer</SubType>
     </None>
+    <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="conf\nodes.xml">
@@ -212,6 +270,19 @@
   <ItemGroup>
     <EmbeddedResource Include="res\world.png" />
     <EmbeddedResource Include="res\world_big.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\Libs\3rd\YAXLib\YAXLib\YAXLib.csproj">
+      <Project>{f1c4d174-c948-4d18-a125-f6855ef55683}</Project>
+      <Name>YAXLib</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\..\Libs\TypeMap\TypeMap\TypeMap.csproj">
+      <Project>{86955C47-2A02-41A4-AB32-C9E592EB2971}</Project>
+      <Name>TypeMap</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="res\function.png" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>

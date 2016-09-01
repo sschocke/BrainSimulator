@@ -1,33 +1,46 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.ComponentModel;
-using YAXLib;
-using GoodAI.Core.Memory;
-using GoodAI.Core.Nodes;
-using GoodAI.Core.Task;
+﻿using GoodAI.Core;
 using GoodAI.Core.Utils;
 using GoodAI.Modules.NeuralNetwork.Group;
-using GoodAI.Modules.NeuralNetwork.Layers;
-using GoodAI.Core;
+using GoodAI.Modules.NeuralNetwork.Tasks;
+using System.ComponentModel;
+using YAXLib;
 
 
 namespace GoodAI.Modules.LSTM.Tasks
 {
-    /// <summary>Updates all network weights according to gradient.</summary>
+    /// <summary>Updates all network weights according to gradient. <br />
+    /// Parameters:
+    /// <ul>
+    ///     <li>CLIP_GRADIENT: Limits error gradient into [-CLIP_GRADIENT,CLIP_GRADIENT] interval. Set to 0 for no bounds</li>
+    /// </ul>
+    /// </summary>
     [Description("Update weights"), MyTaskInfo(OneShot = false)]
-    public class MyLSTMUpdateWeightsTask : MyTask<MyLSTMLayer>
+    public class MyLSTMUpdateWeightsTask : MyAbstractUpdateWeightsTask<MyLSTMLayer>
     {
+        [YAXSerializableField(DefaultValue = 0f)]
+        [MyBrowsable, Category("\tLayer")]
+        public float CLIP_GRADIENT { get; set; }
+
         private MyCudaKernel m_updateGateWeightsKernel;
         private MyCudaKernel m_updateCellWeightsKernel;
 
         public override void Init(int nGPU)
         {
-            m_updateGateWeightsKernel = MyKernelFactory.Instance.Kernel(nGPU, @"LSTM\LSTMUpdateWeightsKernel", "LSTMUpdateGateWeightsKernel");
-            m_updateCellWeightsKernel = MyKernelFactory.Instance.Kernel(nGPU, @"LSTM\LSTMUpdateWeightsKernel", "LSTMUpdateCellWeightsKernel");
-
+            switch (Owner.LearningTasks)
+            {
+                case MyLSTMLayer.LearningTasksType.RTRL:
+                {
+                    m_updateGateWeightsKernel = MyKernelFactory.Instance.Kernel(nGPU, @"LSTM\LSTMUpdateWeightsKernel", "LSTMUpdateGateWeightsKernel");
+                    m_updateCellWeightsKernel = MyKernelFactory.Instance.Kernel(nGPU, @"LSTM\LSTMUpdateWeightsKernel", "LSTMUpdateCellWeightsKernel");
+                    break;
+                }
+                case MyLSTMLayer.LearningTasksType.BPTT:
+                {
+                    m_updateGateWeightsKernel = MyKernelFactory.Instance.Kernel(nGPU, @"LSTM\LSTMUpdateWeightsKernel", "LSTMUpdateGateWeightsKernelBPTT");
+                    m_updateCellWeightsKernel = MyKernelFactory.Instance.Kernel(nGPU, @"LSTM\LSTMUpdateWeightsKernel", "LSTMUpdateCellWeightsKernelBPTT");
+                    break;
+                }
+            }
             m_updateGateWeightsKernel.SetupExecution((Owner.Input.Count + Owner.Output.Count + Owner.CellsPerBlock + 1) * Owner.MemoryBlocks);
             m_updateCellWeightsKernel.SetupExecution((Owner.Input.Count + Owner.Output.Count + 1) * Owner.CellStates.Count);
         }
@@ -53,52 +66,108 @@ namespace GoodAI.Modules.LSTM.Tasks
                 smoothingFactor = 0;
             }
 
-            m_updateGateWeightsKernel.Run(
-                Owner.Input,
-		        Owner.PreviousOutput,
-		        Owner.CellStates,
-		        Owner.CellStateErrors,
-		        Owner.OutputGateDeltas,
-		        Owner.InputGateWeights,
-                Owner.InputGateWeightDeltas,
-                Owner.InputGateWeightMeanSquares,
-		        Owner.ForgetGateWeights,
-                Owner.ForgetGateWeightDeltas,
-                Owner.ForgetGateWeightMeanSquares,
-		        Owner.OutputGateWeights,
-                Owner.OutputGateWeightDeltas,
-                Owner.OutputGateWeightMeanSquares,
-		        Owner.InputGateWeightsRTRLPartials,
-		        Owner.ForgetGateWeightsRTRLPartials,
+            switch (Owner.LearningTasks)
+            {
+                case MyLSTMLayer.LearningTasksType.RTRL:
+                {
+                    m_updateGateWeightsKernel.Run(
+                        Owner.Input,
+                        Owner.PreviousOutput,
+                        Owner.CellStates,
+                        Owner.CellStateErrors,
+                        Owner.OutputGateDeltas,
+                        Owner.InputGateWeights,
+                        Owner.InputGateWeightDeltas,
+                        Owner.InputGateWeightMeanSquares,
+                        Owner.ForgetGateWeights,
+                        Owner.ForgetGateWeightDeltas,
+                        Owner.ForgetGateWeightMeanSquares,
+                        Owner.OutputGateWeights,
+                        Owner.OutputGateWeightDeltas,
+                        Owner.OutputGateWeightMeanSquares,
+                        Owner.InputGateWeightsRTRLPartials,
+                        Owner.ForgetGateWeightsRTRLPartials,
 
-                backPropMethod,
-                trainingRate,
-                momentum,
-                smoothingFactor,
+                        backPropMethod,
+                        trainingRate,
+                        momentum,
+                        smoothingFactor,
+                        CLIP_GRADIENT,
 
-		        Owner.Input.Count,
-		        Owner.PreviousOutput.Count,
-		        Owner.CellsPerBlock
-                );
+                        Owner.Input.Count,
+                        Owner.PreviousOutput.Count,
+                        Owner.CellsPerBlock
+                    );
 
-            m_updateCellWeightsKernel.Run(
-  		        Owner.Input,
-		        Owner.PreviousOutput,
-		        Owner.CellStateErrors,
-		        Owner.CellInputWeights,
-                Owner.CellInputWeightDeltas,
-                Owner.CellInputWeightMeanSquares,
-		        Owner.CellWeightsRTRLPartials,
-               
-                backPropMethod,
-                trainingRate,
-                momentum,
-                smoothingFactor,
+                    m_updateCellWeightsKernel.Run(
+                        Owner.Input,
+                        Owner.PreviousOutput,
+                        Owner.CellStateErrors,
+                        Owner.CellInputWeights,
+                        Owner.CellInputWeightDeltas,
+                        Owner.CellInputWeightMeanSquares,
+                        Owner.CellWeightsRTRLPartials,
 
-                Owner.Input.Count,
-                Owner.PreviousOutput.Count,
-                Owner.CellsPerBlock
-                );
+                        backPropMethod,
+                        trainingRate,
+                        momentum,
+                        smoothingFactor,
+                        CLIP_GRADIENT,
+
+                        Owner.Input.Count,
+                        Owner.PreviousOutput.Count,
+                        Owner.CellsPerBlock
+                    );
+                    break;
+                }
+                case MyLSTMLayer.LearningTasksType.BPTT:
+                {
+                    m_updateGateWeightsKernel.Run(
+                        Owner.InputGateWeights,
+                        Owner.InputGateWeightDeltas, // RMS
+                        Owner.InputGateWeightMeanSquares, // RMS
+                        Owner.ForgetGateWeights,
+                        Owner.ForgetGateWeightDeltas, // RMS
+                        Owner.ForgetGateWeightMeanSquares, // RMS
+                        Owner.OutputGateWeights,
+                        Owner.OutputGateWeightDeltas, // RMS
+                        Owner.OutputGateWeightMeanSquares, //RMS
+
+                        Owner.OutputGateWeightGradient,
+                        Owner.InputGateWeightGradient,
+                        Owner.ForgetGateWeightGradient,
+
+                        backPropMethod,
+                        trainingRate,
+                        momentum,
+                        smoothingFactor,
+                        CLIP_GRADIENT,
+
+                        Owner.Input.Count,
+                        Owner.PreviousOutput.Count,
+                        Owner.CellsPerBlock
+                    );
+
+                    m_updateCellWeightsKernel.Run(
+                        Owner.CellInputWeights,
+                        Owner.CellInputWeightDeltas,
+                        Owner.CellInputWeightMeanSquares,
+
+                        backPropMethod,
+                        trainingRate,
+                        momentum,
+                        smoothingFactor,
+                        CLIP_GRADIENT,
+
+                        Owner.CellInputWeightGradient,
+
+                        Owner.Input.Count,
+                        Owner.PreviousOutput.Count
+                    );
+                    break;
+                }
+            }
+
         }
     }
 }

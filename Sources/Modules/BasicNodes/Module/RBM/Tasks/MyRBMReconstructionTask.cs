@@ -1,13 +1,8 @@
-﻿using GoodAI.Modules.NeuralNetwork.Group;
+﻿using GoodAI.Core.Utils;
+using GoodAI.Modules.NeuralNetwork.Group;
 using GoodAI.Modules.NeuralNetwork.Layers;
-using GoodAI.Core.Task;
-using GoodAI.Core.Utils;
-using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
 
 namespace GoodAI.Modules.RBM
@@ -33,7 +28,7 @@ namespace GoodAI.Modules.RBM
     /// </ul>
     /// </summary>
     [Description("RBM Reconstruction"), MyTaskInfo(OneShot = false)]
-    public class MyRBMReconstructionTask : MyTask<MyNeuralNetworkGroup>
+    public class MyRBMReconstructionTask : MyAbstractBackpropTask
     {
 
         #region Layer indexing
@@ -156,6 +151,12 @@ namespace GoodAI.Modules.RBM
         public override void Execute()
         {
 
+            if (layers.Count <= CurrentLayerIndex)
+            {
+                MyLog.ERROR.WriteLine("Invalid CurrentLayerIndex " + CurrentLayerIndex +
+                                      ". Must be smaller than number of layers which is " + layers.Count);
+                return;
+            }
             if (ReconstructionSource == ReconstructionSource.INPUT)
             {
 
@@ -170,6 +171,10 @@ namespace GoodAI.Modules.RBM
             }
             else
             {
+                // we want to reconstruct from hidden, set layer index to first hidden if it was set to visible
+                if (CurrentLayerIndex == 0)
+                    CurrentLayerIndex = 1;
+
                 MyRBMLayer layer = ((MyRBMLayer)layers[CurrentLayerIndex]);
                 if (layer.Target != null && layer.Target.Count > 0)
                     layer.Output.CopyFromMemoryBlock(layer.Target, 0, 0, layer.Neurons);

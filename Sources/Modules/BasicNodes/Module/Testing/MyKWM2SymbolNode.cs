@@ -1,26 +1,24 @@
 using GoodAI.Core;
 using GoodAI.Core.Memory;
-using GoodAI.Core.Nodes;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
 using GoodAI.Modules.VSA;
 using ManagedCuda;
 using ManagedCuda.BasicTypes;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
 
 namespace GoodAI.Modules.Testing
 {
     /// <author>GoodAI</author>
-    /// <meta>mv</meta>
-    /// <status>WIP</status>
+    /// <meta>mv,mm</meta>
+    /// <status>temporary</status>
     /// <summary>Converts data from KMeansWM to Symbol rep.</summary>
-    /// <description></description>
+    /// <description>
+    /// This is a temporary project-specific node hardly usable for more general purposes and will be removed with a future update.
+    /// Used in the Breakout-playing AI project.
+    /// </description>
     public class MyKWM2SymbolNode : MyCodeBookBase
     {
         [MyInputBlock(1)]
@@ -112,10 +110,9 @@ namespace GoodAI.Modules.Testing
                     var shape1 = Owner.Input.GetDevicePtr(Owner.GPU, i * Owner.ClusterSize);
 
                     m_binder.Bind(shape1, positionSymbol, interResult);
-                    m_binder.Bind(space1, interResult);
+                    m_binder.Bind(space1, interResult, interResult);
 
                     m_addKernel.Run(Owner.Output, Owner.InterResult, Owner.Output, 0, Owner.Output.Count);
-
 
                     // Compute relative differences
                     for (int j = i + 1; j < nrClusters; j++)
@@ -123,22 +120,20 @@ namespace GoodAI.Modules.Testing
                         float x2 = Owner.ClustersPos.Host[j * Owner.ClustersPos.ColumnHint];
                         float y2 = Owner.ClustersPos.Host[j * Owner.ClustersPos.ColumnHint + 1];
 
-
                         var shape2 = Owner.Input.GetDevicePtr(Owner.GPU, j * Owner.ClusterSize);
                         var space2 = SpatialEncode(x1 - x2, y1 - y2);
 
                         m_binder.Unbind(shape1, shape2, interResult);
-                        m_binder.Bind(positionSymbol, interResult);
-                        m_binder.Bind(space2, interResult);
+                        m_binder.Bind(positionSymbol, interResult, interResult);
+                        m_binder.Bind(space2, interResult, interResult);
 
                         m_addKernel.Run(Owner.Output, Owner.InterResult, Owner.Output, 0, Owner.Output.Count);
-
 
                         space2 = SpatialEncode(x2 - x1, y2 - y1);
 
                         m_binder.Unbind(shape2, shape1, interResult);
-                        m_binder.Bind(positionSymbol, interResult);
-                        m_binder.Bind(space2, interResult);
+                        m_binder.Bind(positionSymbol, interResult, interResult);
+                        m_binder.Bind(space2, interResult, interResult);
 
                         m_addKernel.Run(Owner.Output, Owner.InterResult, Owner.Output, 0, Owner.Output.Count);
                     }
@@ -156,7 +151,7 @@ namespace GoodAI.Modules.Testing
                     MyMemoryManager.Instance.GetGlobalVariable<float>(Owner.GlobalVariableName, Owner.GPU, Owner.GenerateRandomVectors).DevicePointer
                     + (int)MyCodeVector.Position * Owner.SymbolSize * sizeof(float), Owner.SymbolSize);
 
-                Owner.PositionSymbol.GetDevice(Owner).CopyToDevice(codeVector, 0, 0, sizeof(float) * Owner.SymbolSize);
+                Owner.PositionSymbol.GetDevice(Owner).CopyToDevice(codeVector, 0, 0, sizeof(float) * Owner.ClusterSize);
             }
 
             private CUdeviceptr SpatialEncode(float x, float y)

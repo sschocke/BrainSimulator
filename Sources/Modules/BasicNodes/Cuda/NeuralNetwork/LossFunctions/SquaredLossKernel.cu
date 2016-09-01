@@ -20,7 +20,8 @@ extern "C"
 		float *targetPtr,
 		float *deltaPtr,
 		float *costPtr,
-		int thisLayerSize
+		int thisLayerSize,
+		int batchSize
 		)
 	{
 		extern __shared__ float loss[];
@@ -30,14 +31,18 @@ extern "C"
 		unsigned int k = tid;
 
 		loss[tid] = 0;
-		while (k < thisLayerSize)
+		__syncthreads();
+
+		while (k < thisLayerSize * batchSize)
 		{
-			// accumulate loss
-			loss[tid] += 0.5f * (outputPtr[k] - targetPtr[k]) * (outputPtr[k] - targetPtr[k]);
+			if (!isnan(targetPtr[k]))
+			{
+				// accumulate loss
+				loss[tid] += 0.5f * (outputPtr[k] - targetPtr[k]) * (outputPtr[k] - targetPtr[k]) / batchSize;
 
-			// calculate delta
-			deltaPtr[k] += EvaluateDerivative(actFunc, neuronInputPtr[k]) * (outputPtr[k] - targetPtr[k]); // batch learning, remember to initialize delta
-
+				// calculate delta
+				deltaPtr[k] += EvaluateDerivative(actFunc, neuronInputPtr[k]) * (outputPtr[k] - targetPtr[k]); // batch learning, remember to initialize delta
+			}
 			k += blockSize;
 		}
 

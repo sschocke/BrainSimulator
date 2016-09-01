@@ -1,16 +1,8 @@
 ﻿using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
 using GoodAI.Core.Task;
-using GoodAI.Modules.Transforms;
 using GoodAI.Core.Utils;
-using ManagedCuda;
-using ManagedCuda.BasicTypes;
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
 
 namespace GoodAI.Modules.Matrix
@@ -35,7 +27,7 @@ namespace GoodAI.Modules.Matrix
     /// <ul>
     ///  <li><b>Addition,Multiplication,Substraction,MultiplElemntWise </b> (two memBlock inputs, or one into A and set the DataInput0 paramter): Two inputs (each of them can be matrix, or vector, or constat). Be careful about the coorect sizes/dimensions of the inputs, it does column/row-wise operation. If only input to the A, then it perforsm multuiplication with the value at DataInput.</li>
     ///  <li><b>DotProd </b> (two memBlock inputs): performs trans(vec) * vec. be carful about the size and dimensions.</li>
-    ///  <li><b>MinIndex, MaxIndex </b> (one mem block input): returns min/max index in the vector.</li>
+    ///  <li><b>MinIndex, MaxIndex </b> (one mem block input): returns min/max index in the vector of its Absolute values.</li>
     ///  <li><b>GetCol,GetRow </b> (two memBlock inputs, or one into A and set the DataInput0 paramter): returns n-th column of the input. N can be DataInput0 or value in the memory block in the B-input.</li>
     ///  <li><b>Minus </b> (one memBlock input): returns -A</li>
     ///  <li><b>Normalize </b> (one memBlock input): return normalized matrix A, Norm2 used in this case.</li>
@@ -106,7 +98,7 @@ namespace GoodAI.Modules.Matrix
 
         public MyExecuteTask Execute { get; private set; }
         /// <summary>
-        /// paramter ,,Execute/params/DataInput0'' can be used for some operations when second input is not given. For example Addition, Multiplication, GetRow, GetCol...
+        /// parameter ,,Execute/params/DataInput0'' can be used for some operations when second input is not given. For example Addition, Multiplication, GetRow, GetCol...
         /// </summary>
         [Description("Execute")]
         public class MyExecuteTask : MyTask<MyMatrixNode>

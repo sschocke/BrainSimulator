@@ -19,23 +19,144 @@ extern "C"
 		RMSProp = 1,
 	} MyBackPropMethod;
 
-	__device__ void SGDWeightUpdate(float trainingRate, float momentum, float *weights, float *weightDeltas, int weightId, float gradient)
+
+	__device__ float Clip(float value, float clip)
 	{
-		float weightDelta = trainingRate * gradient + momentum * weightDeltas[weightId];
-		weightDeltas[weightId] = weightDelta;
-		weights[weightId] += weightDelta;
+		return (clip == 0) * value + (clip != 0) * ((value > clip) * clip + (value < -clip) * -clip + (value >= -clip && value <= clip) * value);
+
+		/* avoids thread divergence, equivalent to:
+		if (clip == 0)
+			return value;
+		else if (value > clip)
+			return clip;
+		else if (value < -clip)
+			return -clip;
+		else
+			return value;
+		*/
 	}
 
-	__device__ void RMSPropWeightUpdate(float trainingRate, float momentum, float smoothingFactor, float *weights, float *weightDeltas, float *weightMeanSquares, int weightId, float gradient)
+	__device__ void SGDWeightUpdate(float trainingRate, float momentum, float clipGradient, float *weights, float *weightDeltas, int weightId, float gradient)
 	{
-		float rmsGradient = gradient + momentum * weightDeltas[weightId];
+		float weightDelta = trainingRate * Clip(gradient, clipGradient) + momentum * weightDeltas[weightId];
+		weightDeltas[weightId] = weightDelta;
+		weights[weightId] -= weightDelta;
+	}
+
+	__device__ void RMSPropWeightUpdate(float trainingRate, float momentum, float smoothingFactor, float clipGradient, float *weights, float *weightDeltas, float *weightMeanSquares, int weightId, float gradient)
+	{
+		float rmsGradient = Clip(gradient, clipGradient) + momentum * weightDeltas[weightId];
 		weightDeltas[weightId] = rmsGradient;
 		float weightMeanSquare = smoothingFactor * weightMeanSquares[weightId] + (1.0f - smoothingFactor) * rmsGradient * rmsGradient;
 		if (weightMeanSquare != 0)
 			rmsGradient /= sqrtf(weightMeanSquare);
 		weightMeanSquares[weightId] = weightMeanSquare;
-		weights[weightId] += trainingRate * rmsGradient;
+		weights[weightId] -= trainingRate * rmsGradient;
 	}
+
+
+	__global__ void LSTMUpdateGateWeightsKernelBPTT(
+		float *inputGateWeights,
+		float *inputGateWeightDeltas,
+		float *inputGateWeightMeanSquares,
+		float *forgetGateWeights,
+		float *forgetGateWeightDeltas,
+		float *forgetGateWeightMeanSquares,
+		float *outputGateWeights,
+		float *outputGateWeightDeltas,
+		float *outputGateWeightMeanSquares,
+
+		float* outputGateWeightGradient,
+		float* inputGateWeightGradient,
+		float* forgetGateWeightGradient,
+
+		MyBackPropMethod backPropMethod,
+		float trainingRate,
+		float momentum,
+		float smoothingFactor,
+		float clipGradient,
+
+		int inputCount,
+		int previousOutputCount,
+		int cellsPerBlock
+		)
+	{
+		int weightId = blockDim.x * blockIdx.y * gridDim.x	//rows preceeding current row in grid
+			+ blockDim.x * blockIdx.x				//blocks preceeding current block
+			+ threadIdx.x;
+
+		int weightsPerGate = inputCount + previousOutputCount + cellsPerBlock + 1;
+
+		if (weightId < weightsPerGate * previousOutputCount / cellsPerBlock)
+		{
+			if (backPropMethod == RMSProp)
+			{
+				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, clipGradient, outputGateWeights, outputGateWeightDeltas, outputGateWeightMeanSquares, weightId, outputGateWeightGradient[weightId]);
+				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, clipGradient, inputGateWeights, inputGateWeightDeltas, inputGateWeightMeanSquares, weightId, inputGateWeightGradient[weightId]);
+				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, clipGradient, forgetGateWeights, forgetGateWeightDeltas, forgetGateWeightMeanSquares, weightId, forgetGateWeightGradient[weightId]);
+			}
+			else
+			{
+				SGDWeightUpdate(trainingRate, momentum, clipGradient, outputGateWeights, outputGateWeightDeltas, weightId, outputGateWeightGradient[weightId]);
+				SGDWeightUpdate(trainingRate, momentum, clipGradient, inputGateWeights, inputGateWeightDeltas, weightId, inputGateWeightGradient[weightId]);
+				SGDWeightUpdate(trainingRate, momentum, clipGradient, forgetGateWeights, forgetGateWeightDeltas, weightId, forgetGateWeightGradient[weightId]);
+			}
+		}
+	}
+
+
+    __global__ void LSTMUpdateCellWeightsKernelBPTT(
+		float *cellInputWeights,
+		float *cellInputWeightDeltas,
+		float *cellInputWeightMeanSquares,
+
+		MyBackPropMethod backPropMethod,
+		float trainingRate,
+		float momentum,
+		float smoothingFactor,
+		float clipGradient,
+
+		float *cellInputWeightGradient,
+
+		int inputCount,
+		int previousOutputCount
+		)
+	{
+		int weightId = blockDim.x * blockIdx.y * gridDim.x	//rows preceeding current row in grid
+			+ blockDim.x * blockIdx.x				//blocks preceeding current block
+			+ threadIdx.x;
+
+		int weightsPerCell = inputCount + previousOutputCount + 1;
+		int cellStatesCount = previousOutputCount;
+
+		if (weightId < weightsPerCell * cellStatesCount)
+		{
+			int cellId = weightId / weightsPerCell;
+			if (backPropMethod == RMSProp)
+			{
+				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, clipGradient, cellInputWeights, cellInputWeightDeltas, cellInputWeightMeanSquares, weightId, cellInputWeightGradient[weightId]);
+			}
+			else
+			{
+				SGDWeightUpdate(trainingRate, momentum, clipGradient, cellInputWeights, cellInputWeightDeltas, weightId, cellInputWeightGradient[weightId]);
+			}
+		}
+	}
+
+
+
+	/*****************************************************************************************************************************************************************/
+	/*****************************************************************************************************************************************************************/
+	/*****************************************************************************************************************************************************************/
+	/*****************************************************************************************************************************************************************/
+	/*
+	/*  ORIGINAL FROM KAREL
+	*/
+	/*****************************************************************************************************************************************************************/
+	/*****************************************************************************************************************************************************************/
+	/*****************************************************************************************************************************************************************/
+
+
 
 	__global__ void LSTMUpdateGateWeightsKernel(
 		float *input,
@@ -59,6 +180,7 @@ extern "C"
 		float trainingRate,
 		float momentum,
 		float smoothingFactor,
+		float clipGradient,
 
 		int inputCount,
 		int previousOutputCount,
@@ -71,7 +193,7 @@ extern "C"
 
 		int weightsPerGate = inputCount + previousOutputCount + cellsPerBlock + 1;
 
-		if (weightId < weightsPerGate * previousOutputCount/cellsPerBlock)
+		if (weightId < weightsPerGate * previousOutputCount / cellsPerBlock)
 		{
 			int fromId = weightId % weightsPerGate;
 			int toId = weightId / weightsPerGate;
@@ -83,9 +205,9 @@ extern "C"
 			int isFromBiasUnit = fromId == (inputCount + previousOutputCount + cellsPerBlock);
 
 			float inputFromWeight = isFromInputUnit * input[isFromInputUnit * fromId]
-									+ isFromPreviousOutputUnit * previousOutput[isFromPreviousOutputUnit * (fromId - inputCount)]
-									+ isPeephole * cellStates[isPeephole * (toId * cellsPerBlock + (fromId - inputCount - previousOutputCount))]
-									+ isFromBiasUnit * 1;
+				+ isFromPreviousOutputUnit * previousOutput[isFromPreviousOutputUnit * (fromId - inputCount)]
+				+ isPeephole * cellStates[isPeephole * (toId * cellsPerBlock + (fromId - inputCount - previousOutputCount))]
+				+ isFromBiasUnit * 1;
 			float outputGateWeightGradient = outputGateDeltas[toId] * inputFromWeight;
 
 			//calculate input and forget gate weight gradients
@@ -101,15 +223,15 @@ extern "C"
 			//update gate weights
 			if (backPropMethod == RMSProp)
 			{
-				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, outputGateWeights, outputGateWeightDeltas, outputGateWeightMeanSquares, weightId, outputGateWeightGradient);
-				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, inputGateWeights, inputGateWeightDeltas, inputGateWeightMeanSquares, weightId, inputGateWeightGradient);
-				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, forgetGateWeights, forgetGateWeightDeltas, forgetGateWeightMeanSquares, weightId, forgetGateWeightGradient);
+				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, clipGradient, outputGateWeights, outputGateWeightDeltas, outputGateWeightMeanSquares, weightId, outputGateWeightGradient);
+				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, clipGradient, inputGateWeights, inputGateWeightDeltas, inputGateWeightMeanSquares, weightId, inputGateWeightGradient);
+				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, clipGradient, forgetGateWeights, forgetGateWeightDeltas, forgetGateWeightMeanSquares, weightId, forgetGateWeightGradient);
 			}
 			else // SGD
 			{
-				SGDWeightUpdate(trainingRate, momentum, outputGateWeights, outputGateWeightDeltas, weightId, outputGateWeightGradient);
-				SGDWeightUpdate(trainingRate, momentum, inputGateWeights, inputGateWeightDeltas, weightId, inputGateWeightGradient);
-				SGDWeightUpdate(trainingRate, momentum, forgetGateWeights, forgetGateWeightDeltas, weightId, forgetGateWeightGradient);
+				SGDWeightUpdate(trainingRate, momentum, clipGradient, outputGateWeights, outputGateWeightDeltas, weightId, outputGateWeightGradient);
+				SGDWeightUpdate(trainingRate, momentum, clipGradient, inputGateWeights, inputGateWeightDeltas, weightId, inputGateWeightGradient);
+				SGDWeightUpdate(trainingRate, momentum, clipGradient, forgetGateWeights, forgetGateWeightDeltas, weightId, forgetGateWeightGradient);
 			}
 		}
 	}
@@ -127,6 +249,7 @@ extern "C"
 		float trainingRate,
 		float momentum,
 		float smoothingFactor,
+		float clipGradient,
 
 		int inputCount,
 		int previousOutputCount,
@@ -138,18 +261,19 @@ extern "C"
 			+ threadIdx.x;
 
 		int weightsPerCell = inputCount + previousOutputCount + 1;
-		
+
 		if (weightId < weightsPerCell * previousOutputCount)
 		{
 			int cellId = weightId / weightsPerCell;
 			if (backPropMethod == RMSProp)
 			{
-				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, cellInputWeights, cellInputWeightDeltas, cellInputWeightMeanSquares, weightId, cellStateErrors[cellId] * cellWeightsRTRLPartials[weightId]);
+				RMSPropWeightUpdate(trainingRate, momentum, smoothingFactor, clipGradient, cellInputWeights, cellInputWeightDeltas, cellInputWeightMeanSquares, weightId, cellStateErrors[cellId] * cellWeightsRTRLPartials[weightId]);
 			}
 			else
 			{
-				SGDWeightUpdate(trainingRate, momentum, cellInputWeights, cellInputWeightDeltas, weightId, cellStateErrors[cellId] * cellWeightsRTRLPartials[weightId]);
+				SGDWeightUpdate(trainingRate, momentum, clipGradient, cellInputWeights, cellInputWeightDeltas, weightId, cellStateErrors[cellId] * cellWeightsRTRLPartials[weightId]);
 			}
 		}
 	}
+
 }

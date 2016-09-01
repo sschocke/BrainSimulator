@@ -6,9 +6,7 @@ using ManagedCuda.BasicTypes;
 using ManagedCuda.CudaFFT;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using ManagedCuda;
 
 namespace GoodAI.Modules.VSA
 {
@@ -22,18 +20,24 @@ namespace GoodAI.Modules.VSA
         private MyCudaKernel m_inversionKernel;
         private MyCudaKernel m_normalKernel;
 
-        private MyCudaKernel m_dotKernel;
+        private MyProductKernel<float> m_dotKernel;
 
         private int m_firstFFTOffset;
         private int m_secondFFTOffset;
         private int m_tempOffset;
 
+        CudaStream m_stream;
+
 
         public MyFourierBinder(MyWorkingNode owner, int inputSize, MyMemoryBlock<float> tempBlock)
             : base(owner, inputSize, tempBlock)
         {
+            m_stream = new CudaStream();
+
             m_fft = new CudaFFTPlan1D(inputSize, cufftType.R2C, 1);
+            m_fft.SetStream(m_stream.Stream);
             m_ifft = new CudaFFTPlan1D(inputSize, cufftType.C2R, 1);
+            m_ifft.SetStream(m_stream.Stream);
 
             m_mulkernel = MyKernelFactory.Instance.Kernel(owner.GPU, @"Common\CombineVectorsKernel", "MulComplexElementWise");
             m_mulkernel.SetupExecution(inputSize + 1);
@@ -44,7 +48,7 @@ namespace GoodAI.Modules.VSA
             m_inversionKernel = MyKernelFactory.Instance.Kernel(owner.GPU, @"Transforms\InvertValuesKernel", "InvertLengthComplexKernel");
             m_inversionKernel.SetupExecution(inputSize);
 
-            m_dotKernel = MyReductionFactory.Kernel(owner.GPU, MyReductionFactory.Mode.f_DotProduct_f);
+            m_dotKernel = MyKernelFactory.Instance.KernelProduct<float>(owner, owner.GPU, ProductMode.f_DotProduct_f);
 
             m_normalKernel = MyKernelFactory.Instance.Kernel(owner.GPU, @"Transforms\TransformKernels", "PolynomialFunctionKernel");
             m_normalKernel.SetupExecution(inputSize);
@@ -63,56 +67,42 @@ namespace GoodAI.Modules.VSA
         }
 
 
-        public override void Bind(CUdeviceptr firstInput, params CUdeviceptr[] otherInputs)
+        public override void Bind(CUdeviceptr firstInput, IEnumerable<CUdeviceptr> otherInputs, CUdeviceptr output)
         {
-            if (otherInputs == null)
-            {
-                otherInputs = new CUdeviceptr[] { firstInput };
-            }
             m_fft.Exec(firstInput, m_tempBlock.GetDevicePtr(m_owner, m_secondFFTOffset));
 
-            int count = otherInputs.Length == 1 ? otherInputs.Length : otherInputs.Length - 1;
-
-            for (int i = 0; i < count; ++i)
+            foreach (var input in otherInputs)
             {
-                CUdeviceptr start = otherInputs[i];
-                m_fft.Exec(start, m_tempBlock.GetDevicePtr(m_owner, m_firstFFTOffset));
-                m_mulkernel.Run(
+                m_fft.Exec(input, m_tempBlock.GetDevicePtr(m_owner, m_firstFFTOffset));
+                m_mulkernel.RunAsync(
+                    m_stream,
                     m_tempBlock.GetDevicePtr(m_owner, m_firstFFTOffset),
                     m_tempBlock.GetDevicePtr(m_owner, m_secondFFTOffset),
                     m_tempBlock.GetDevicePtr(m_owner, m_secondFFTOffset), m_inputSize + 1);
             }
 
-            CUdeviceptr output = otherInputs[otherInputs.Length - 1];
             FinishBinding(output);
         }
 
-        public override void Unbind(CUdeviceptr firstInput, params CUdeviceptr[] otherInputs)
+        public override void Unbind(CUdeviceptr firstInput, IEnumerable<CUdeviceptr> otherInputs, CUdeviceptr output)
         {
-            if (otherInputs == null)
-            {
-                otherInputs = new CUdeviceptr[] { firstInput };
-            }
             m_fft.Exec(firstInput, m_tempBlock.GetDevicePtr(m_owner, m_secondFFTOffset));
 
-            int count = otherInputs.Length == 1 ? otherInputs.Length : otherInputs.Length - 1;
-
-            for (int i = 0; i < count; ++i)
+            foreach (var input in otherInputs)
             {
-                CUdeviceptr start = otherInputs[i];
-                m_involutionKernel.Run(start, m_tempBlock.GetDevicePtr(m_owner, m_tempOffset), m_inputSize);
+                m_involutionKernel.RunAsync(m_stream, input, m_tempBlock.GetDevicePtr(m_owner, m_tempOffset), m_inputSize);
                 m_fft.Exec(m_tempBlock.GetDevicePtr(m_owner, m_tempOffset), m_tempBlock.GetDevicePtr(m_owner, m_firstFFTOffset));
 
                 if (ExactQuery)
-                    m_inversionKernel.Run(m_tempBlock.GetDevicePtr(m_owner, m_firstFFTOffset), m_tempBlock.GetDevicePtr(m_owner, m_firstFFTOffset), m_inputSize);
-              
-                m_mulkernel.Run(
+                    m_inversionKernel.RunAsync(m_stream, m_tempBlock.GetDevicePtr(m_owner, m_firstFFTOffset), m_tempBlock.GetDevicePtr(m_owner, m_firstFFTOffset), m_inputSize);
+
+                m_mulkernel.RunAsync(
+                    m_stream,
                     m_tempBlock.GetDevicePtr(m_owner, m_secondFFTOffset),
                     m_tempBlock.GetDevicePtr(m_owner, m_firstFFTOffset),
                     m_tempBlock.GetDevicePtr(m_owner, m_secondFFTOffset), m_inputSize + 1);
             }
 
-            CUdeviceptr output = otherInputs[otherInputs.Length - 1];
             FinishBinding(output);
         }
 
@@ -124,7 +114,8 @@ namespace GoodAI.Modules.VSA
 
             if (NormalizeOutput)
             {
-                m_dotKernel.Run(m_tempBlock, 0, output, output, m_inputSize);
+                //ZXC m_dotKernel.RunAsync(m_stream, m_tempBlock, 0, output, output, m_inputSize, /* distributed: */ 0);
+                m_dotKernel.RunAsync(m_stream, m_tempBlock, output, output, m_inputSize);
                 m_tempBlock.SafeCopyToHost(0, 1);
 
                 if (m_tempBlock.Host[0] > 0.000001f)
@@ -138,6 +129,10 @@ namespace GoodAI.Modules.VSA
             if (factor != 1.0f)
             {
                 m_normalKernel.Run(0, 0, factor, 0, output, output, m_inputSize);
+            }
+            else
+            {
+                m_stream.Synchronize();
             }
         }
     }

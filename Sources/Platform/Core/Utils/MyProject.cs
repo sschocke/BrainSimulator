@@ -1,15 +1,14 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using YAXLib;
+﻿using GoodAI.Core.Configuration;
+using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
 using GoodAI.Core.Observers;
-using System.Reflection;
-using System.Text.RegularExpressions;
-using GoodAI.Core.Configuration;
+using GoodAI.Core.Execution;
+using System;
+using System.Collections.Generic;
+using System.Text;
 using System.IO;
+using GoodAI.Core.Dashboard;
+using YAXLib;
 
 namespace GoodAI.Core.Utils
 {
@@ -19,8 +18,26 @@ namespace GoodAI.Core.Utils
         [YAXSerializableField, YAXAttributeForClass]
         public string Name { get; set; }
 
-        [YAXSerializableField, YAXSerializeAs("Observers")]
-        public List<MyAbstractObserver> Observers;               
+        public void SetNameFromPath(string path)
+        {
+            Name = MakeNameFromPath(path);
+        }
+
+        public static string MakeNameFromPath(string path)
+        {
+            return Path.GetFileNameWithoutExtension(path);
+        }
+
+        public static string MakeDataFolderFromFileName(string path)
+        {
+            return Path.Combine(Path.GetDirectoryName(path), MyProject.MakeNameFromPath(path) + ".statedata");
+        }
+
+        [YAXSerializableField]
+        [YAXSerializeAs("Observers")]
+        public List<MyAbstractObserver> Observers { get; set; }
+
+        public MySimulationHandler SimulationHandler { get; set; }
 
         public void Dispose()
         {
@@ -54,14 +71,14 @@ namespace GoodAI.Core.Utils
             }
         }
 
-        public N CreateNode<N>() where N : MyNode, new()
+        public TNode CreateNode<TNode>() where TNode : MyNode, new()
         {
-            return (N)CreateNode(typeof(N));
+            return (TNode)CreateNode(typeof(TNode));
         }        
 
         public MyNode CreateNode(Type nodeType)
         {
-            MyNode newNode = Activator.CreateInstance(nodeType) as MyNode;
+            var newNode = Activator.CreateInstance(nodeType) as MyNode;
             newNode.Owner = this;
             newNode.Init();
 
@@ -69,6 +86,14 @@ namespace GoodAI.Core.Utils
         }
 
         #endregion
+
+        public MyConnection Connect(MyNode fromNode, MyNode toNode, int fromIndex=0, int toIndex=0)
+        {
+            var connection = new MyConnection(fromNode, toNode, fromIndex, toIndex);
+            connection.Connect();
+
+            return connection;
+        }
 
         #region Network & World properties code
 
@@ -190,6 +215,26 @@ namespace GoodAI.Core.Utils
 
         #endregion
 
+        #region Dashboard
+
+        [YAXSerializableField]
+        public Dashboard.Dashboard Dashboard { get; set; }
+
+        [YAXSerializableField]
+        public Dashboard.GroupDashboard GroupedDashboard { get; set; }
+
+        #endregion
+
+        #region Project Options
+
+        [YAXSerializableField]
+        public bool LoadAllNodesData { get; set; }
+
+        [YAXSerializableField]
+        public bool SaveAllNodesData { get; set; }
+
+        #endregion
+
         #region Serialization & Versioning
 
         [YAXSerializableField, YAXSerializeAs("UsedModules")]
@@ -199,8 +244,13 @@ namespace GoodAI.Core.Utils
 
         public static YAXSerializer GetSerializer()
         {
-            return new YAXSerializer(typeof(MyProject), 
-                YAXExceptionHandlingPolicies.DoNotThrow, YAXExceptionTypes.Error, YAXSerializationOptions.DontSerializeNullObjects);
+            return GetSerializer<MyProject>();
+        }
+
+        public static YAXSerializer GetSerializer<T>()
+        {
+            return new YAXSerializer(typeof(T),
+                YAXExceptionHandlingPolicies.DoNotThrow, YAXExceptionTypes.Error, YAXSerializationOptions.SerializeNullObjects);
         }
 
         public string Serialize(string projectPath)
@@ -227,9 +277,9 @@ namespace GoodAI.Core.Utils
          
             MyNodeGroup.IteratorAction scanForModules = delegate(MyNode node)
             {
-                if (MyConfiguration.AssemblyLookup.ContainsKey(node.GetType().Assembly))
+                if (MyConfiguration.AssemblyLookup.ContainsKey(node.GetType().Assembly.FullName))
                 {
-                    usedModules.Add(MyConfiguration.AssemblyLookup[node.GetType().Assembly]);
+                    usedModules.Add(MyConfiguration.AssemblyLookup[node.GetType().Assembly.FullName]);
                 }
                 else
                 {
@@ -288,7 +338,14 @@ namespace GoodAI.Core.Utils
             return convertedXml;
         }        
 
-        public static MyProject Deserialize(string xml, string projectPath)
+        /// <summary>
+        /// Deserializes the project from a given string.
+        /// </summary>
+        /// <param name="xml">The input string for deserialization.</param>
+        /// <param name="projectPath">Project path for correct lookup of items like state data.</param>
+        /// <param name="restoreModelOnly">If set to true, only the model is deserialized, but not observers etc.</param>
+        /// <returns>A deserialized project.</returns>
+        public static MyProject Deserialize(string xml, string projectPath, bool restoreModelOnly = false)
         {            
             xml = MyBaseConversion.ConvertOldFileVersioning(xml);
             xml = MyBaseConversion.ConvertOldModuleNames(xml);
@@ -308,6 +365,8 @@ namespace GoodAI.Core.Utils
             }
 
             loadedProject.World.FinalizeTasksDeserialization();
+
+            loadedProject.World.UpdateAfterDeserialization();
             loadedProject.m_nodeCounter = loadedProject.Network.UpdateAfterDeserialization(0, loadedProject);
 
             if (loadedProject.World.Id > loadedProject.m_nodeCounter)
@@ -319,6 +378,9 @@ namespace GoodAI.Core.Utils
 
             loadedProject.ConnectWorld();            
 
+            if (!restoreModelOnly)
+                loadedProject.Restore();
+
             return loadedProject;
         }
 
@@ -327,25 +389,45 @@ namespace GoodAI.Core.Utils
             for (int i = 0; i < serializer.ParsingErrors.Count; i++)
             {
                 var error = serializer.ParsingErrors[i];
-                YAXExceptionTypes errorLevel = error.Value;
 
-                if (error.Key is YAXAttributeMissingException ||
-                    error.Key is YAXElementMissingException ||
-                    error.Key is YAXElementValueMissingException)
-                {
-                    errorLevel = YAXExceptionTypes.Warning;
-                }
+                MyLogLevel logLevel;
 
-                switch (errorLevel)
+                switch (error.Value)
                 {
                     case YAXExceptionTypes.Error:
-                        MyLog.ERROR.WriteLine(error.Key.Message);
+                        logLevel = MyLogLevel.ERROR;
+                        break;
+                    case YAXExceptionTypes.Ignore:
+                        logLevel = MyLogLevel.INFO;
                         break;
                     case YAXExceptionTypes.Warning:
-                        MyLog.WARNING.WriteLine(error.Key.Message);
+                        logLevel = MyLogLevel.WARNING;
                         break;
                     default:
+                        throw new ArgumentOutOfRangeException();
+                }
+
+                if (error.Key is YAXAttributeMissingException || error.Key is YAXElementValueMissingException)
+                    logLevel = MyLogLevel.WARNING;
+
+                if (error.Key is YAXElementMissingException)
+                    logLevel = MyLogLevel.DEBUG;
+
+                switch (logLevel)
+                {
+                    case MyLogLevel.ERROR:
+                        MyLog.ERROR.WriteLine(error.Key.Message);
                         break;
+                    case MyLogLevel.WARNING:
+                        MyLog.WARNING.WriteLine(error.Key.Message);
+                        break;
+                    case MyLogLevel.DEBUG:
+                        MyLog.DEBUG.WriteLine(error.Key.Message);
+                        break;
+                    case MyLogLevel.INFO:
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException();
                 }
             }
         }
@@ -450,5 +532,34 @@ namespace GoodAI.Core.Utils
         }
 
         #endregion
+
+        public void Restore()
+        {
+            RestoreObservers();
+            RestoreDashboard();
+        }
+
+        private void RestoreDashboard()
+        {
+            if (Dashboard == null)
+                Dashboard = new Dashboard.Dashboard();
+
+            if (GroupedDashboard == null)
+                GroupedDashboard = new GroupDashboard();
+
+            // The order is important - the normal dashboard properties must be set up
+            // before they're added to groups.
+            Dashboard.RestoreFromIds(this);
+            GroupedDashboard.RestoreFromIds(this);
+        }
+
+        public void RestoreObservers()
+        {
+            if (Observers == null)
+                return;
+
+            foreach (MyAbstractObserver observer in Observers)
+                observer.RestoreTargetFromIdentifier(this);
+        }
     }
 }

@@ -1,18 +1,17 @@
 ﻿using GoodAI.Core.Memory;
-using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using YAXLib;
 
 namespace GoodAI.Core.Nodes
 {    
     public class MyParentInput : MyNode
     {
+        public MyParentInput()
+        {
+            base.OutputBranches = 1;
+        }
+
         [MyOutputBlock]
         public MyMemoryBlock<float> Output
         {
@@ -43,7 +42,7 @@ namespace GoodAI.Core.Nodes
 
         public override int OutputBranches
         {
-            get { return 1; }
+            get { return base.OutputBranches; }
             set { }
         }
 

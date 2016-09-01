@@ -1,29 +1,33 @@
-﻿using GoodAI.Core.Configuration;
+﻿using GoodAI.BrainSimulator.NodeView;
+using GoodAI.Core.Configuration;
 using GoodAI.Core.Execution;
 using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
 using GoodAI.Core.Observers;
 using GoodAI.Core.Utils;
-using GoodAI.BrainSimulator.Nodes;
-using GoodAI.BrainSimulator.NodeView;
-using GoodAI.BrainSimulator.Utils;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
-using System.Data;
-using System.Diagnostics;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
 using System.Windows.Forms;
+using GoodAI.Core.Dashboard;
 using WeifenLuo.WinFormsUI.Docking;
 
 namespace GoodAI.BrainSimulator.Forms
 {
-    public partial class NodePropertyForm : DockContent
+    public partial class NodePropertyForm : DockContent, INotifyPropertyChanged
     {
-        private MainForm m_mainForm;
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        protected virtual void OnPropertyChanged(string propertyName = null)
+        {
+            if (PropertyChanged != null)
+                PropertyChanged(this, new PropertyChangedEventArgs(propertyName));
+
+            m_mainForm.ProjectStateChanged(string.Format("Node property value changed: {0}", propertyName));
+        }
+
+        private readonly MainForm m_mainForm;
 
         public bool CanEdit
         {
@@ -39,6 +43,11 @@ namespace GoodAI.BrainSimulator.Forms
             set { 
                 propertyGrid.SelectedObject = value;
 
+                if (!(value is MyNode))
+                {
+                    dashboardButton.Enabled = false;
+                }
+
                 UpdateTitleAndButtons();                    
                 UpdateObserverList();                
             }
@@ -53,42 +62,29 @@ namespace GoodAI.BrainSimulator.Forms
 
         private void propertyGrid_PropertyValueChanged(object s, PropertyValueChangedEventArgs e)
         {
-            MyNodeView nodeView = null;
+            OnPropertyChanged(e.ChangedItem.PropertyDescriptor.Name);
 
-            foreach(GraphLayoutForm graphView in m_mainForm.GraphViews.Values) {
+            var node = propertyGrid.SelectedObject as MyNode;
+            if (node != null)
+            {
+                var nodeGroup = node as MyNodeGroup;
+                if (nodeGroup != null)
+                    m_mainForm.ReloadGraphLayout(nodeGroup);
 
-                if (graphView.Desktop.FocusElement is MyNodeView 
-                    && (graphView.Desktop.FocusElement as MyNodeView).Node == propertyGrid.SelectedObject)
-                {
-                    nodeView = graphView.Desktop.FocusElement as MyNodeView;                    
-                    nodeView.UpdateView();               
-                }
-
-                if (propertyGrid.SelectedObject is MyNodeGroup && graphView.Target == propertyGrid.SelectedObject)
-                {
-                    graphView.Text = graphView.Target.Name;
-                }
-
-                graphView.Desktop.Invalidate();
+                node.Updated();
             }
 
-            if (nodeView != null)
+            foreach (GraphLayoutForm graphView in m_mainForm.GraphViews.Values)
             {
-                if (nodeView.BranchChangeNeeded)
-                {
-                    if (nodeView.OutputBranchChangeNeeded)
-                    {
-                        m_mainForm.CloseObservers(nodeView.Node);
-                    }
+                if (propertyGrid.SelectedObject is MyNodeGroup && graphView.Target == propertyGrid.SelectedObject)
+                    graphView.Text = graphView.Target.Name;
+            }
 
-                    if (nodeView.Node is MyNodeGroup)
-                    {
-                        m_mainForm.ReloadGraphLayout(nodeView.Node as MyNodeGroup);
-                    }
-
-                    (nodeView as MyVariableBranchView).UpdateBranches();
-                }
-            }            
+            foreach (TextEditForm textEditor in m_mainForm.TextEditors.Values)
+            {
+                if (textEditor.Target == propertyGrid.SelectedObject)
+                    textEditor.Text = textEditor.Target.Name;
+            }
 
             propertyGrid.Refresh();
 
@@ -184,6 +180,14 @@ namespace GoodAI.BrainSimulator.Forms
             m_mainForm.CreateAndShowObserverView(Target as MyWorkingNode, (sender as ToolStripMenuItem).Tag as Type);
         }
 
+        private void RefreshNode(MyWorkingNode node)
+        {
+            node.Updated();
+
+            propertyGrid.Refresh();
+            m_mainForm.InvalidateGraphLayouts();
+        }
+
         private void saveDataNodeButton_Click(object sender, EventArgs e)
         {
             /*
@@ -194,20 +198,24 @@ namespace GoodAI.BrainSimulator.Forms
             }       
             */
 
-            if (Target is MyWorkingNode) 
-            {
-                (Target as MyWorkingNode).SaveOnStop = saveNodeDataButton.Checked;
-                propertyGrid.Refresh();
-            }
+            MyWorkingNode node = Target as MyWorkingNode;
+            if (node == null)
+                return;
+
+            node.SaveOnStop = saveNodeDataButton.Checked;
+                
+            RefreshNode(node);
         }
 
         private void loadNodeDataButton_Click(object sender, EventArgs e)
         {
-            if (Target is MyWorkingNode)
-            {
-                (Target as MyWorkingNode).LoadOnStart = loadNodeDataButton.Checked;
-                propertyGrid.Refresh();
-            }
+            MyWorkingNode node = Target as MyWorkingNode;
+            if (node == null)
+                return;
+
+            node.LoadOnStart = loadNodeDataButton.Checked;
+
+            RefreshNode(node);
         }
 
         private void helpButton_Click(object sender, EventArgs e)
@@ -227,6 +235,56 @@ namespace GoodAI.BrainSimulator.Forms
         private void snapshotButton_Click(object sender, EventArgs e)
         {
             (Target as MyAbstractObserver).AutosaveSnapshop = snapshotButton.Checked;
+        }
+
+        private void dashboardButton_CheckedChanged(object sender, EventArgs e)
+        {
+            if (propertyGrid.SelectedGridItem.PropertyDescriptor == null)
+                return;
+
+            PropertyDescriptor propertyDescriptor = propertyGrid.SelectedGridItem.PropertyDescriptor;
+
+            if (propertyDescriptor != null)
+                m_mainForm.DashboardPropertyToggle(Target, propertyDescriptor.Name, dashboardButton.Checked);
+        }
+
+        public void RefreshView()
+        {
+            propertyGrid.Refresh();
+        }
+
+        private void propertyGrid_SelectedGridItemChanged(object sender, SelectedGridItemChangedEventArgs e)
+        {
+            RefreshDashboardButton();
+        }
+
+        private void propertyGrid_Enter(object sender, EventArgs e)
+        {
+            RefreshDashboardButton();
+        }
+
+        private void RefreshDashboardButton()
+        {
+            if (ActiveControl == propertyGrid && propertyGrid.SelectedGridItem != null && Target is MyNode)
+            {
+                PropertyDescriptor descriptor = propertyGrid.SelectedGridItem.PropertyDescriptor;
+                if (descriptor == null)
+                    return;
+
+                if (descriptor.IsReadOnly)
+                {
+                    dashboardButton.Enabled = false;
+                    return;
+                }
+
+                // A real property has been selected.
+                dashboardButton.Enabled = true;
+                dashboardButton.Checked = m_mainForm.CheckDashboardContains(Target, descriptor.Name);
+            }
+            else
+            {
+                dashboardButton.Enabled = false;
+            }
         }
     }
 }

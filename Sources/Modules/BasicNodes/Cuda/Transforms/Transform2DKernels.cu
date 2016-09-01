@@ -146,23 +146,16 @@ extern "C"
    	__global__ void BilinearResampleSubImageKernel_ForManyProposals(const float *input, float *output, const float* subImageDefs, bool safeBounds,
 		int subImageDefsDim, int inputWidth, int inputHeight, int outputWidth, int outputHeight, int numberSubImages, int outputSize)
 	{
+		int id = blockDim.x * blockIdx.y * gridDim.x
+				+ blockDim.x * blockIdx.x
+				+ threadIdx.x;
 
-        int px = threadIdx.x;
-        int py = threadIdx.y;
-        int subim_id = blockIdx.x;
+        int px = id % outputWidth;  // line in the single output image
+        int subim_id = id / outputWidth / outputHeight;  // which image it is
+        int py = (id / outputWidth) % outputHeight;  // column in the single output image
 
-        //__shared__ float cache[6*6] ;  //--- it does not make a big difference :-(
-
-        if (blockDim.x*blockDim.y*gridDim.x != outputSize)
+        if (id<outputSize)
         {
-            //--- wrong kernel sizes!!!
-            return;
-        }
-
-        if ((px + py*outputWidth + subim_id*outputWidth*outputHeight)<outputSize) // double check!!
-        {
-
-		//---- copy of subimCode to resample image
 			float subImgCX = subImageDefs[0 + subim_id*subImageDefsDim]; // <-1, 1>
 			float subImgCY = subImageDefs[1 + subim_id*subImageDefsDim]; // <-1, 1>
 			float subImgDiameter = subImageDefs[2 + subim_id*subImageDefsDim]; // <0,1>
@@ -199,7 +192,7 @@ extern "C"
 				float yDist = (yRatio * py) - y;
  
 				//--- Points
-				float topLeft= input[(y + subImgY) * inputWidth + x];
+				float topLeft= input[(y + subImgY) * inputWidth + x + subImgX];
 				float topRight = input[(y + subImgY) * inputWidth + x + subImgX + 1];
 				float bottomLeft = input[(y + subImgY + 1) * inputWidth + x + subImgX];
 				float bottomRight = input[(y + subImgY + 1) * inputWidth + x + subImgX + 1 ]; 
@@ -211,17 +204,7 @@ extern "C"
 					bottomRight * xDist * yDist;
  
 				output[py * outputWidth + px + subim_id*outputWidth*outputHeight] = result;
-                //cache[py * outputWidth + px] = result;
 			}
-	    /*	//--- copy these results to the output matrix :D
-            __syncthreads();
-	    	if (px==0 && py==0){
-                for (int i=0 ; i<outputWidth*outputHeight ; i++)
-                {
-                    output[i + subim_id*outputWidth*outputHeight] = cache[i];
-                }
-            }
-         */
         }
 	}
 
@@ -318,4 +301,121 @@ extern "C"
 		}
 	}
 
+
+
+
+
+    //------------------------------------------------------------------------------------------------------------------------
+    //                          RETINA STUFF
+    //------------------------------------------------------------------------------------------------------------------------
+
+    __device__ void EstimateParForSubsample(float* subImageDefs, bool safeBounds,
+		int inputWidth, int inputHeight,
+        int2 & subImg, int & diameterPix)
+    {
+    	diameterPix = (int)( fminf( (float)inputWidth,(float)inputHeight ) * subImageDefs[2] ); // <0,1> 
+
+		subImg.x = (int)((float)inputWidth * (subImageDefs[0] + 1) * 0.5f) ;//- diameterPix / 2;
+		subImg.y = (int)((float)inputHeight * (subImageDefs[1] + 1) * 0.5f);// - diameterPix / 2;
+
+		int maxDiameter = min(inputWidth - 1, inputHeight - 1);
+
+        diameterPix = max(1, diameterPix);
+		diameterPix = min(maxDiameter, diameterPix);
+
+		if (safeBounds) 
+		{
+			subImg.x = max(subImg.x, 1);
+			subImg.y = max(subImg.y, 1);
+			subImg.x = min(subImg.x, inputWidth - diameterPix - 1);
+			subImg.y = min(subImg.y, inputHeight - diameterPix - 1);			
+		}
+    }
+
+
+    __global__ void RetinaTransform_HaveAtLeastOneValueThere (float * subImageDefs, 
+                                                     float* input, int inputWidth, int inputHeight,
+                                                     float* output,int outputDataSize,
+                                                     float* retinaMask, int retinaDataSize, int retinaMaskColHint,
+                                                     float* retinaDataInserted)
+    {
+        int id_retinaPoint = blockDim.x * blockIdx.y * gridDim.x
+				    + blockDim.x * blockIdx.x
+				    + threadIdx.x;
+
+		int2 subImg;
+        int diameterPix;
+        bool  safeBounds = 0;
+
+
+        EstimateParForSubsample( subImageDefs,  safeBounds, inputWidth,  inputHeight,  subImg, diameterPix );
+
+        if (id_retinaPoint<outputDataSize)
+        {
+            output[id_retinaPoint] = 0; // default value
+            float x_mask = (retinaMask[id_retinaPoint*retinaMaskColHint]*diameterPix);
+            float y_mask = (retinaMask[id_retinaPoint*retinaMaskColHint+1]*diameterPix);
+
+            int x = subImg.x + x_mask;
+            int y = subImg.y + y_mask;
+            if (x<inputWidth && y<inputHeight && x>=0 && y>=0)
+            {
+                float val = input[x+y*inputWidth];
+                output[id_retinaPoint] = val;
+
+                atomicAdd(output + id_retinaPoint , val);
+                atomicAdd(retinaDataInserted + id_retinaPoint , 1);
+            }
+        }
+    }
+
+    __global__ void RetinaTransform_FillRetinaAtomic (float * subImageDefs, 
+                                                       float* input, int inputWidth, int inputHeight,
+                                                       float* output,int outputDataSize,
+                                                       float* retinaMask, int retinaDataSize, int retinaMaskColHint,
+                                                       float* retinaDataInserted)
+    {
+        int id_pxl = blockDim.x * blockIdx.y * gridDim.x
+				    + blockDim.x * blockIdx.x
+				    + threadIdx.x;
+
+		int2 subImg;
+        int diameterPix;
+        bool  safeBounds = 0;
+
+        int x = id_pxl % inputWidth;
+        int y = id_pxl/inputWidth;
+
+        EstimateParForSubsample( subImageDefs,  safeBounds, inputWidth,  inputHeight,  subImg, diameterPix );
+
+        if (id_pxl<inputWidth*inputHeight)
+        {
+            float minDist = 999999.9; // ??>? should be written bette
+            int minIdx = 1;
+            for (int id_retinaPoint=0 ; id_retinaPoint<retinaDataSize ; id_retinaPoint++)
+            {
+                float x_mask = (retinaMask[id_retinaPoint*retinaMaskColHint]*diameterPix);
+                float y_mask = (retinaMask[id_retinaPoint*retinaMaskColHint+1]*diameterPix);
+
+                x_mask += subImg.x;
+                y_mask += subImg.y;
+
+                float dist = (x-x_mask)*(x-x_mask) + (y-y_mask)*(y-y_mask);
+
+                if (dist<minDist)
+                {
+                    minDist = dist;
+                    minIdx  = id_retinaPoint;
+                }
+            }
+            atomicAdd(output + minIdx , input[id_pxl]);
+            atomicAdd(retinaDataInserted + minIdx , 1);
+        }
+    }
+
+
+
+    
+
 }
+

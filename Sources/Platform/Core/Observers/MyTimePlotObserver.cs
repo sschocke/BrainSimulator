@@ -1,19 +1,12 @@
-﻿using GoodAI.Core.Nodes;
-using GoodAI.Core.Observers;
-using GoodAI.Core.Utils;
-using GoodAI.Core.Memory;
+﻿using GoodAI.Core.Memory;
+using GoodAI.Core.Nodes;
 using GoodAI.Core.Observers.Helper;
+using GoodAI.Core.Utils;
 using ManagedCuda;
-using ManagedCuda.VectorTypes;
 using System;
 using System.ComponentModel;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Drawing;
-using System.Threading.Tasks;
 using YAXLib;
-using GoodAI.Core.Task;
 
 namespace GoodAI.Core.Observers
 {
@@ -515,6 +508,9 @@ namespace GoodAI.Core.Observers
         {
             base.Reset();
 
+            m_StringDeviceBuffer = new CudaDeviceVariable<float>(1000);
+            m_StringDeviceBuffer.Memset(0);
+
             switch (DisplayMethod)
             {
                 case MyDisplayMethod.CYCLE:
@@ -675,6 +671,8 @@ namespace GoodAI.Core.Observers
             m_lastSimulationStep = SimulationStep;
         }
 
+        private CudaDeviceVariable<float> m_StringDeviceBuffer;
+
         private void drawCoordinates()
         {
             m_canvas.Memset(COLOR_BACKGROUND);
@@ -690,7 +688,8 @@ namespace GoodAI.Core.Observers
                 double value = firstOrdinate + n * unit;
                 string valueStr = string.Format("{0,8:N" + displayPrecision + "}", value);
                 double y = TextureHeight - m_plotAreaOffsetY - m_plotAreaHeight * (value - m_plotCurrentValueMin) / range - MyDrawStringHelper.CharacterHeight / 2;
-                MyDrawStringHelper.DrawString(valueStr, 0, (int)y, COLOR_BACKGROUND, COLOR_FONT, VBODevicePointer, TextureWidth, TextureHeight);
+                MyDrawStringHelper.String2Index(valueStr, m_StringDeviceBuffer);
+                MyDrawStringHelper.DrawStringFromGPUMem(m_StringDeviceBuffer, 0, (int)y, COLOR_BACKGROUND, COLOR_FONT, VBODevicePointer, TextureWidth, TextureHeight, 0, valueStr.Length);
             }
 
         }
@@ -733,7 +732,7 @@ namespace GoodAI.Core.Observers
                 m_cycleKernel.SetupExecution(nbColumnsToDraw * m_plotAreaHeight);
                 m_cycleKernel.Run(
                     VBODevicePointer,
-                    0,
+                    5,
                     nbColumnsToDraw,
                     m_valuesHistory.DevicePointer
                     );
@@ -920,11 +919,11 @@ namespace GoodAI.Core.Observers
         {
             if (declaredOwner == Target.Owner)
             {
-                return Target.Owner.Name + " - " + Target.Name;
+                return Target.Owner.Name + ": " + Target.Name;
             }
             else
             {
-                return declaredOwner.Name + " (" + Target.Owner.Name + ") - " + Target.Name;
+                return declaredOwner.Name + " (" + Target.Owner.Name + "): " + Target.Name;
             }
         }
 

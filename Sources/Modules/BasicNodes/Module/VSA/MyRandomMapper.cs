@@ -1,20 +1,12 @@
-﻿using GoodAI.Core.Memory;
+﻿using GoodAI.Core;
+using GoodAI.Core.Memory;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
-using ManagedCuda;
-using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Diagnostics;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using GoodAI.Modules.Matrix;
-using GoodAI.Core.Nodes;
 using GoodAI.Modules.Transforms;
-using ManagedCuda.CudaBlas;
+using System;
+using System.ComponentModel;
 using YAXLib;
-using GoodAI.Core;
 
 namespace GoodAI.Modules.VSA
 {
@@ -178,9 +170,9 @@ namespace GoodAI.Modules.VSA
 
                 var random = new Random(Owner.Seed);
 
-                var dotKernel = MyReductionFactory.Kernel(Owner.GPU, MyReductionFactory.Mode.f_DotProduct_f);
+                var dotKernel = MyKernelFactory.Instance.KernelProduct<float>(Owner, Owner.GPU, ProductMode.f_DotProduct_f);
                 var multKernel = MyKernelFactory.Instance.Kernel(Owner.GPU, @"common\CombineVectorsKernel", "CombineTwoVectorsKernelVarSize");
-                var transposeKernel = MyKernelFactory.Instance.Kernel(Owner.GPU, @"VSA\RandomMapper", "Transpose");
+                var transposeKernel = MyKernelFactory.Instance.Kernel(Owner.GPU, @"VSA\Mappers", "Transpose");
 
                 int xDim, yDim;
                 AxisToNormalizeEnum axisToNormalize = AxisToNormalize;
@@ -240,7 +232,7 @@ namespace GoodAI.Modules.VSA
                 // Transposition is needed because of legacy reasons
                 if (!Owner.DoDecoding)
                     // Non-query -- transposed multiplication
-                    ops.Run(MatOperation.Multiplication, x, yDim, yDim, A, xDim * yDim, xDim, y, xDim, xDim, 0);
+                    ops.Run(MatOperation.Multiplication, x, xDim, xDim, A, xDim * yDim, yDim, y, yDim, yDim, 0);
                 else
                     // Query mode -- non-transposed multiplication
                     ops.Run(MatOperation.Multiplication, A, xDim * yDim, xDim, x, xDim, 1, y, yDim, 1, 0);

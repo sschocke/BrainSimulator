@@ -1,21 +1,24 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using GoodAI.Core;
-using GoodAI.Modules.NeuralNetwork.Layers;
-using GoodAI.Modules.NeuralNetwork.Tasks;
+﻿using GoodAI.Core;
+using GoodAI.Core.Nodes;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
+using GoodAI.Modules.NeuralNetwork.Group;
+using GoodAI.Modules.NeuralNetwork.Layers;
+using GoodAI.Modules.NeuralNetwork.Tasks;
+using ManagedCuda.BasicTypes;
+using System;
+using System.ComponentModel;
 
 namespace CustomModels.NeuralNetwork.Tasks
 {
-    class MyConvolutionTasks
-    {
-    }
 
+    /// <author>GoodAI</author>
+    /// <meta>mz</meta>
+    /// <status>Working</status>
+    /// <summary>
+    /// Performs MAX pooling forward pass. Chooses the max value from each receptive field and its each position (determined by FilterW/H and Stride parameters).
+    /// </summary>
+    /// <description></description>
     [Description("PoolingForward"), MyTaskInfo(OneShot = false)]
     public class MyPoolingForwardTask : MyAbstractForwardTask<MyPoolingLayer>
     {
@@ -38,13 +41,21 @@ namespace CustomModels.NeuralNetwork.Tasks
                 Owner.InputWidth, Owner.InputWidth * Owner.InputHeight,
                 Owner.FilterWidth, Owner.FilterHeight,
                 Owner.HorizontalStride, Owner.VerticalStride,
-                Owner.OutputWidth * Owner.OutputHeight,
+                Owner.OutputWidth, Owner.OutputWidth * Owner.OutputHeight,
                 Owner.Neurons
-                );
+            );
             MyLog.DEBUG.WriteLine("Pooling.");
         }
     }
 
+    /// <author>GoodAI</author>
+    /// <meta>mz</meta>
+    /// <status>Working</status>
+    /// <summary>
+    /// Propagates deltas back through the pooling layer.
+    /// The chosen max value is saved in each forward pass and used in this backward pass to determine the neuron that will receive the delta.
+    /// </summary>
+    /// <description></description>
     [Description("PoolingBackward"), MyTaskInfo(OneShot = false)]
     public class MyPoolingBackwardTask : MyAbstractBackDeltaTask<MyPoolingLayer>
     {
@@ -59,129 +70,173 @@ namespace CustomModels.NeuralNetwork.Tasks
 
         public override void Execute() //Task execution
         {
-            if (Owner.ParentNetwork.SGD.Enabled) // SGD
+            MyLog.DEBUG.WriteLine("Pooling backward.");
+            
+            // pointer to previous layer
+            MyNode node = Owner.Input.Owner;
+
+            if (node is MyAbstractLayer)
             {
+                MyAbstractLayer previousLayer = node as MyAbstractLayer;
+
+                // reset delta
+                previousLayer.Delta.Fill(0);
+
+                // determine input to previous layer
+                CUdeviceptr prevInputPtr = MyAbstractLayer.DetermineInput(previousLayer);
+
                 m_kernel.SetupExecution(Owner.Neurons);
                 m_kernel.Run(
-                    Owner.Input,
-                    Owner.ParentNetwork.SGD.TrainingRate,
-                    Owner.ParentNetwork.SGD.Momentum,
-                    Owner.Input.Count,
+                    (int)previousLayer.ActivationFunction,
+                    Owner.Delta,
+                    previousLayer.Delta,
+                    prevInputPtr,
+                    Owner.ActivatedNeurons,
                     Owner.Neurons
-                    );
-            }
-            else if (Owner.ParentNetwork.RMS.Enabled) // RMSProp
-            {
-                // TODO: Implement RProp!
-                MyLog.ERROR.WriteLine("No RMSProp not yet implemented for fully convolution layers");
-            }
-            else
-                MyLog.ERROR.WriteLine("No backprop task selected in " + Owner.ParentNetwork + " please select SGD or RProp to perform backpropagation");
-        }
-    }
-
-    [Description("PadImage"), MyTaskInfo(OneShot = false)]
-    public class MyPadImageTask : MyTask<MyConvolutionLayer>
-    {
-        private MyCudaKernel m_kernel;
-
-        public MyPadImageTask() { } //parameterless constructor
-
-        public override void Init(int nGPU) //Kernel initialization
-        {
-            m_kernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Convolution\ConvolutionKernel", "PadImageKernel");
-        }
-
-        public override void Execute() //Task execution
-        {
-            if (Owner.ZeroPadding <= 0) return;
-
-            Owner.PaddedImage.Fill(0);
-
-            m_kernel.SetupExecution(Owner.Input.Count);
-            m_kernel.Run(
-                Owner.Input,
-                Owner.PaddedImage,
-                Owner.InputWidth,
-                Owner.ZeroPadding,
-                Owner.InputWidth*Owner.InputHeight,
-                (Owner.InputWidth + Owner.ZeroPadding + Owner.ZeroPadding) * (Owner.InputHeight + Owner.ZeroPadding + Owner.ZeroPadding),
-                Owner.Input.Count
                 );
+            }
+
         }
     }
 
+
+    /// <author>GoodAI</author>
+    /// <meta>mz</meta>
+    /// <status>Working</status>
+    /// <summary>
+    /// Standard forward pass of the convolution operation.
+    /// </summary>
+    /// <description></description>
     [Description("ConvolutionForward"), MyTaskInfo(OneShot = false)]
     public class MyConvolutionForwardTask : MyAbstractForwardTask<MyConvolutionLayer>
     {
-        private MyCudaKernel m_kernel;
+        private MyCudaKernel m_kernel, m_padKernel;
 
         public MyConvolutionForwardTask() { } //parameterless constructor
 
         public override void Init(int nGPU) //Kernel initialization
         {
+            m_padKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Convolution\ConvolutionKernel", "PadImageKernel");
             m_kernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Convolution\ConvolutionKernel", "ConvolutionForwardKernel");
         }
 
         public override void Execute() //Task execution
         {
+            MyLog.DEBUG.WriteLine("Convolution forward.");
+            
+
+
+
+          /*  if (Owner.Input == null)
+            {
+                MyLog.ERROR.WriteLine("Convolution forward error: Input to " + Owner.Name + " is null.");
+                return;
+            }*/
+
+
+            // first perform zero padding
+            m_padKernel.SetupExecution(Owner.Input.Count);
+            m_padKernel.Run(
+                Owner.Input,
+                Owner.PaddedImage,
+                Owner.InputWidth,
+                Owner.ZeroPadding,
+                Owner.InputWidth * Owner.InputHeight,
+                (Owner.InputWidth + Owner.ZeroPadding + Owner.ZeroPadding) * (Owner.InputHeight + Owner.ZeroPadding + Owner.ZeroPadding),
+                Owner.Input.Count
+            );
+
+
+
+
+
             m_kernel.SetupExecution(Owner.Output.Count);
-
-            // use the input image as it is
-            if (Owner.ZeroPadding <= 0)
-
-                m_kernel.Run(
-                    Owner.Input,
-                    Owner.Weights,
-                    Owner.Bias,
-                    Owner.Output,
-                    Owner.FilterWidth, Owner.FilterHeight,
-                    Owner.InputDepth,
-                    Owner.FilterWidth * Owner.FilterHeight,
-                    Owner.FilterWidth * Owner.FilterHeight * Owner.InputDepth,
-                    Owner.InputWidth * Owner.InputHeight,
-                    Owner.InputWidth,
-                    Owner.OutputWidth * Owner.OutputHeight,
-                    1 + (Owner.InputWidth - Owner.FilterWidth) / Owner.HorizontalStride, //1 + (inputWidth - filterWidth) / horStride
-                    Owner.HorizontalStride, Owner.VerticalStride,
-                    Owner.Output.Count
-                );
-            // do and use zero padding
-            else
-                m_kernel.Run(
-                    Owner.PaddedImage,
-                    Owner.Weights,
-                    Owner.Bias,
-                    Owner.Output,
-                    Owner.FilterWidth, Owner.FilterHeight,
-                    Owner.InputDepth,
-                    Owner.FilterWidth * Owner.FilterHeight,
-                    Owner.FilterWidth * Owner.FilterHeight * Owner.InputDepth,
-                    (Owner.InputWidth + Owner.ZeroPadding + Owner.ZeroPadding) * (Owner.InputHeight + Owner.ZeroPadding + Owner.ZeroPadding),
-                    (Owner.InputWidth + Owner.ZeroPadding + Owner.ZeroPadding),
-                    Owner.OutputWidth * Owner.OutputHeight,
-                    1 + ((Owner.InputWidth + Owner.ZeroPadding + Owner.ZeroPadding) - Owner.FilterWidth) / Owner.HorizontalStride, //1 + (inputWidth - filterWidth) / horStride
-                    Owner.HorizontalStride, Owner.VerticalStride,
-                    Owner.Output.Count
-                );
+            m_kernel.Run(
+                (int)Owner.ActivationFunction,
+                Owner.PaddedImage,
+                Owner.Weights,
+                Owner.Bias,
+                Owner.Output,
+                Owner.NeuronInput,
+                Owner.FilterWidth, Owner.FilterHeight, Owner.InputDepth,
+                Owner.FilterWidth * Owner.FilterHeight,
+                Owner.FilterWidth * Owner.FilterHeight * Owner.InputDepth,
+                (Owner.InputWidth + Owner.ZeroPadding + Owner.ZeroPadding) * (Owner.InputHeight + Owner.ZeroPadding + Owner.ZeroPadding),
+                (Owner.InputWidth + Owner.ZeroPadding + Owner.ZeroPadding),
+                Owner.OutputWidth * Owner.OutputHeight,
+                1 + ((Owner.InputWidth + Owner.ZeroPadding + Owner.ZeroPadding) - Owner.FilterWidth) / Owner.HorizontalStride, //1 + (inputWidth - filterWidth) / horStride
+                Owner.HorizontalStride, Owner.VerticalStride,
+                Owner.Output.Count
+            );
 
         }
     }
 
+    /// <author>GoodAI</author>
+    /// <meta>mz</meta>
+    /// <status>Working</status>
+    /// <summary>
+    /// Computes deltas of the previous layer from deltas on this convolutional layer.
+    /// </summary>
+    /// <description></description>
+    [Description("ConvolutionBackward"), MyTaskInfo(OneShot = false)]
     public class MyConvolutionBackwardTask : MyAbstractBackDeltaTask<MyConvolutionLayer>
     {
+        private MyCudaKernel m_kernel;
+
         public override void Init(int nGPU)
         {
-            MyLog.DEBUG.WriteLine("Convolution Back Init");
+            m_kernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Convolution\ConvolutionKernel", "ConvolutionBackwardKernel");
         }
 
         public override void Execute()
         {
-            MyLog.DEBUG.WriteLine("Convolution Back Execute");
+            MyLog.DEBUG.WriteLine("Convolution backward.");
+
+            // pointer to previous layer
+            MyNode node = Owner.Input.Owner;
+
+            if (node is MyAbstractLayer)
+            {
+                MyAbstractLayer previousLayer = node as MyAbstractLayer;
+
+                // reset delta
+                previousLayer.Delta.Fill(0);
+
+                // determine input to previous layer
+                CUdeviceptr prevInputPtr = MyAbstractLayer.DetermineInput(previousLayer);
+
+                m_kernel.SetupExecution(previousLayer.Neurons);
+                m_kernel.Run(
+                    (int)previousLayer.ActivationFunction,
+                    Owner.Weights,
+                    Owner.Delta,
+                    previousLayer.Delta,
+                    prevInputPtr,
+                    Owner.FilterCount,
+                    Owner.InputWidth * Owner.InputHeight, // input slice size without padding
+                    (Owner.InputWidth + Owner.ZeroPadding + Owner.ZeroPadding) * (Owner.InputHeight + Owner.ZeroPadding + Owner.ZeroPadding), // input slice size
+                    Owner.ZeroPadding,
+                    Owner.InputWidth, Owner.InputHeight,
+                    Owner.FilterWidth, Owner.FilterHeight,
+                    Owner.FilterWidth * Owner.FilterHeight,
+                    Owner.FilterWidth * Owner.FilterHeight * Owner.InputDepth, 
+                    Owner.OutputWidth, Owner.OutputHeight, Owner.OutputWidth * Owner.OutputHeight,
+                    Owner.HorizontalStride, Owner.VerticalStride,
+                    previousLayer.Neurons
+                );
+            }
         }
     }
 
-
+    /// <author>GoodAI</author>
+    /// <meta>mz</meta>
+    /// <status>Working</status>
+    /// <summary>
+    /// Randomly initialises weights and biases of the convolution layer.
+    /// Uses normal distribution with standard deviation of 1 / (sqrt(input.Count))
+    /// </summary>
+    /// <description></description>
     [Description("InitLayer"), MyTaskInfo(OneShot = true)]
     public class MyConvolutionInitLayerTask : MyTask<MyConvolutionLayer>
     {
@@ -194,13 +249,46 @@ namespace CustomModels.NeuralNetwork.Tasks
             Owner.PreviousBiasDelta.Fill(0f);
             Owner.PreviousWeightDelta.Fill(0f);
 
-            // init random weights
-            // float stdDev = 1.0f / (float)Math.Sqrt(Owner.Input.Count + 1);
             float stdDev = 0.01f;
+
+            // init random weights
+            if (Owner.Input != null && Owner.Input.Count > 0)
+                stdDev = 1.0f / (float)Math.Sqrt(Owner.Input.Count + 1);
+                
             MyKernelFactory.Instance.GetRandDevice(Owner).GenerateNormal(Owner.Weights.GetDevice(Owner), 0, stdDev);
             MyKernelFactory.Instance.GetRandDevice(Owner).GenerateNormal(Owner.Bias.GetDevice(Owner), 0, stdDev);
-//            Owner.Weights.Fill(1f);
-//            Owner.Bias.Fill(0f);
+        }
+    }
+
+
+    /// <author>GoodAI</author>
+    /// <meta>mz</meta>
+    /// <status>Working</status>
+    /// <summary>
+    /// Updates the weights (filters) of this convolutional layer. The exact algorithm to be used is chosen using the parent network's settings.
+    /// </summary>
+    /// <description></description>
+    [Description("UpdateWeights"), MyTaskInfo(OneShot = false)]
+    public class MyConvolutionUpdateWeights : MyAbstractUpdateWeightsTask<MyConvolutionLayer>
+    {
+        public override void Init(int nGPU) { }
+
+        public override void Execute() //Task execution
+        {
+            // get enabled loss function
+            MyTask task = Owner.ParentNetwork.GetEnabledTask("BackPropagation");
+            MyAbstractBackpropTask backpropTask = null;
+            if (task is MyAbstractBackpropTask)
+                backpropTask = task as MyAbstractBackpropTask;
+            else
+                MyLog.ERROR.WriteLine("Backprop task does not derive from MyAbstractBackpropTask in " + Owner.ParentNetwork);
+
+            if (backpropTask == null)
+                MyLog.ERROR.WriteLine("Undetermined backprop task in " + Owner.ParentNetwork);
+            else
+            {
+                backpropTask.Execute(Owner); // call the group task to do the backpropagation
+            }
         }
     }
 }

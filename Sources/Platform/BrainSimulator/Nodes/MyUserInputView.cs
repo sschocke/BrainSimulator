@@ -1,18 +1,15 @@
 ﻿using GoodAI.Core.Configuration;
 using GoodAI.Core.Nodes;
-using GoodAI.Core.Utils;
 using Graph;
 using Graph.Items;
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace GoodAI.BrainSimulator.NodeView
 {
     internal class MyUserInputView : MyNodeView
     {
+        public bool ShowValues { get; set; }
+
         private List<NodeSliderItem> sliders = new List<NodeSliderItem>();
 
         private float minValue;
@@ -25,8 +22,10 @@ namespace GoodAI.BrainSimulator.NodeView
             base.UpdateView();
 
             MyUserInput userInputNode = Node as MyUserInput;
-            int newSlidersCount = userInputNode.ConvertToBinary ? 1 : userInputNode.OutputSize;
+            
+            ShowValues = userInputNode.ShowValues;
 
+            int newSlidersCount = userInputNode.ConvertToBinary ? 1 : userInputNode.OutputSize;
             if (newSlidersCount != sliders.Count)
             {
                 sliders.ForEach(s => RemoveItem(s));
@@ -40,12 +39,8 @@ namespace GoodAI.BrainSimulator.NodeView
                     sliders.Add(slider);
                     AddItem(slider);
                 }                
-                SetSlidersToDefault();
             }
-            else if (minValue != userInputNode.MinValue || maxValue != userInputNode.MaxValue)
-            {
-                SetSlidersToDefault();
-            }
+            SetSlidersToDefault();
         }
 
         private void SetSlidersToDefault()
@@ -59,6 +54,9 @@ namespace GoodAI.BrainSimulator.NodeView
             {
                 NodeSliderItem slider = sliders[i];
                 slider.Value = (userInputNode.GetUserInput(i) - minValue) / (maxValue - minValue);
+                SetText(slider);
+                if (!ShowValues)
+                    slider.TextSize = 0;
             }
         }
 
@@ -66,11 +64,17 @@ namespace GoodAI.BrainSimulator.NodeView
         {
             NodeSliderItem slider = (NodeSliderItem)sender;
             int index = (int)slider.Tag;
+            SetText(slider);
 
             if (Node is MyUserInput)
             {
                 (Node as MyUserInput).SetUserInput(index, (e.Item as NodeSliderItem).Value);
             }
+        }
+
+        private void SetText(NodeSliderItem slider)
+        {
+            slider.Text = ShowValues ? slider.Value.ToString("n2") : null;
         }
     }
 }

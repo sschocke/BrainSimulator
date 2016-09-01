@@ -1,22 +1,26 @@
-﻿using GoodAI.Core.Nodes;
+﻿using GoodAI.BrainSimulator.NodeView;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
-using GoodAI.BrainSimulator.NodeView;
-using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
+using GoodAI.Core.Dashboard;
+using GoodAI.Core.Nodes;
 using WeifenLuo.WinFormsUI.Docking;
 
 namespace GoodAI.BrainSimulator.Forms
 {
-    public partial class TaskPropertyForm : DockContent
+    public partial class TaskPropertyForm : DockContent, INotifyPropertyChanged
     {
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        protected virtual void OnPropertyChanged(string propertyName = null)
+        {
+            if (PropertyChanged != null)
+                PropertyChanged(this, new PropertyChangedEventArgs(propertyName));
+
+            m_mainForm.ProjectStateChanged(string.Format("Task property value changed: {0}", propertyName));
+        }
+
         private MainForm m_mainForm;
 
         public MyTask Target
@@ -34,15 +38,55 @@ namespace GoodAI.BrainSimulator.Forms
 
         private void propertyGrid_PropertyValueChanged(object s, PropertyValueChangedEventArgs e)
         {
-            //TODO: rewrite this, no need to loop all, just topmost
-            foreach (GraphLayoutForm graphView in m_mainForm.GraphViews.Values)
+            OnPropertyChanged(e.ChangedItem.PropertyDescriptor.Name);
+
+            Target.GenericOwner.Updated();
+        }
+
+        public void RefreshView()
+        {
+            propertyGrid.Refresh();
+        }
+
+        private void dashboardButton_CheckedChanged(object sender, System.EventArgs e)
+        {
+            PropertyDescriptor propertyDescriptor = propertyGrid.SelectedGridItem.PropertyDescriptor;
+
+            if (propertyDescriptor != null)
+                m_mainForm.DashboardPropertyToggle(Target, propertyDescriptor.Name, dashboardButton.Checked);
+        }
+
+        private void propertyGrid_SelectedGridItemChanged(object sender, SelectedGridItemChangedEventArgs e)
+        {
+            RefreshDashboardButton();
+        }
+
+        private void propertyGrid_Enter(object sender, System.EventArgs e)
+        {
+            RefreshDashboardButton();
+        }
+
+        private void RefreshDashboardButton()
+        {
+            if (ActiveControl == propertyGrid && propertyGrid.SelectedGridItem != null && Target is MyTask)
             {
-                if (graphView.Desktop.FocusElement is MyNodeView)
+                PropertyDescriptor descriptor = propertyGrid.SelectedGridItem.PropertyDescriptor;
+                if (descriptor == null)
+                    return;
+
+                if (descriptor.IsReadOnly)
                 {
-                    MyNodeView nodeView = graphView.Desktop.FocusElement as MyNodeView;
-                    nodeView.UpdateView();
-                }                
-                graphView.Desktop.Invalidate();
+                    dashboardButton.Enabled = false;
+                    return;
+                }
+
+                // A real property has been selected.
+                dashboardButton.Enabled = true;
+                dashboardButton.Checked = m_mainForm.CheckDashboardContains(Target, descriptor.Name);
+            }
+            else
+            {
+                dashboardButton.Enabled = false;
             }
         }
     }

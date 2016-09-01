@@ -95,6 +95,21 @@ extern "C"
 
 
 
+    __global__ void Matrix_transposeFromSVDnodeCOPY(const float* A, int Acount, int Acols, float* out0)
+	{
+        int id = blockDim.x*blockIdx.y*gridDim.x	+ blockDim.x*blockIdx.x	+ threadIdx.x;
+
+        int Arows = Acount/Acols;
+
+		int x = id / Arows;
+		int y = id % Arows;
+
+		if (id < Acount)
+		{
+			out0[x * Arows + y] = A[y * Acols + x];
+		}
+	}
+
 
     /*
      * this works:
@@ -134,6 +149,8 @@ extern "C"
             return A-B;
         if (op=='*')
             return A*B;
+		if (op == '^')
+			return powf(A,B);
         return -1;
     }
     __device__ void Matrix_performOperation_naive(char op, int id,  const float * A , int Acount, int Acols, const float * B , int Bcount, int Bcols, float * out0 , int out0count, int out0cols, float value)
@@ -165,6 +182,14 @@ __global__ void Matrix_Addition_naive(const float * A , int Acount, int Acols, c
 		if (id<Acount)
 		{
             Matrix_performOperation_naive('+',id,A ,Acount, Acols, B , Bcount, Bcols, out0 , out0count, out0cols, value);
+		}
+	}
+__global__ void Matrix_Pow_naive(const float * A, int Acount, int Acols, const float * B, int Bcount, int Bcols, float * out0, int out0count, int out0cols, float value)
+	{
+		int id = blockDim.x*blockIdx.y*gridDim.x + blockDim.x*blockIdx.x + threadIdx.x;
+		if (id<Acount)
+		{
+			Matrix_performOperation_naive('^', id, A, Acount, Acols, B, Bcount, Bcols, out0, out0count, out0cols, value);
 		}
 	}
 __global__ void Matrix_MultiplElementWise_naive(const float * A , int Acount, int Acols, const float * B , int Bcount, int Bcols, float * out0 , int out0count, int out0cols, float value)
@@ -236,6 +261,23 @@ __global__ void Matrix_Substraction_naive(const float * A , int Acount, int Acol
 			out0[id] = ceil(A[id]);
 		}
 	}	
+
+
+
+
+
+    __global__ void Matrix_PermuteRows(const float * A , int Acount, int Acols, const float * B , int Bcount, int Bcols, float * out0 , int out0count, int out0cols)
+	{
+		int id = blockDim.x*blockIdx.y*gridDim.x	+   blockDim.x*blockIdx.x	  +   threadIdx.x;
+        int id_row, id_col, id_rowNew;
+		if (id<Acount)
+		{
+            id_row = id/Acols;
+            id_col = id%Acols;
+            id_rowNew = B[id_row]*Acols;
+            out0[id] = A[id_col + id_rowNew];
+		}
+	}
 
 
 }

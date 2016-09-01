@@ -1,28 +1,27 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using System.Diagnostics;
+﻿using GoodAI.Core.Configuration;
+using GoodAI.Core.Memory;
+using GoodAI.Core.Nodes;
+using GoodAI.Core.Utils;
+using GoodAI.Modules.Transforms;
 using ManagedCuda;
 using ManagedCuda.BasicTypes;
-using ManagedCuda.VectorTypes;
 using ManagedCuda.CudaRand;
-using GoodAI.Core.Nodes;
-using GoodAI.Core.Memory;
-using GoodAI.Core.Utils;
-using System.Reflection;
+using ManagedCuda.VectorTypes;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
-using GoodAI.Core.Configuration;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace GoodAI.Core
 {
     public class MyCudaKernel
     {
-        public int MAX_THREADS { get; private set;  }
+        public int MAX_THREADS { get; protected set;  }
 
-        private CudaKernel m_kernel;
-        private int m_GPU;
+        protected CudaKernel m_kernel;
+        protected int m_GPU;
 
         public string KernelName { get { return m_kernel.KernelName; } }
         public dim3 BlockDimensions { get { return m_kernel.BlockDimensions; } set {m_kernel.BlockDimensions = value; } }
@@ -47,7 +46,7 @@ namespace GoodAI.Core
         {
             m_GPU = GPU;
             m_kernel = new CudaKernel(kernelName, module, cuda);
-            MAX_THREADS = cuda.GetDeviceInfo().MaxThreadsPerBlock; //TODO: maybe move to KernelFactory
+            MAX_THREADS = m_kernel.MaxThreadsPerBlock;
         }
 
         public void Run(params object[] args)
@@ -57,9 +56,38 @@ namespace GoodAI.Core
                 if (args[i] is MyAbstractMemoryBlock)
                 {
                     args[i] = (args[i] as MyAbstractMemoryBlock).GetDevicePtr(m_GPU);
+                    if (((CUdeviceptr)args[i]).Pointer == 0)
+                    {
+                        // TODO(Premek): this is now handled in observers, should be also handled in the simulation
+                        throw new InvalidOperationException("Memory block resolved to null device ptr (not allocated on device?).");
+                    }
                 }
             }
+
             m_kernel.Run(args);
+        }
+
+        public void RunAsync(CudaStream stream, params object[] args)
+        {
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] is MyAbstractMemoryBlock)
+                {
+                    args[i] = (args[i] as MyAbstractMemoryBlock).GetDevicePtr(m_GPU);
+                    if (((CUdeviceptr)args[i]).Pointer == 0)
+                    {
+                        // TODO(Premek): this is now handled in observers, should be also handled in the simulation
+                        throw new InvalidOperationException("Memory block resolved to null device ptr (not allocated on device?).");
+                    }
+                }
+            }
+
+            CUstream cuStream = CUstream.NullStream;
+            if (stream != null)
+            {
+                cuStream = stream.Stream;
+            }
+            m_kernel.RunAsync(cuStream, args);
         }
 
         public void SetupExecution(int numOfParallelUnits)
@@ -198,29 +226,55 @@ namespace GoodAI.Core
             return kernel;
         }
 
-        //TODO: rewrite this! repetitive code
-
-        public MyCudaKernel Kernel(int nGPU, string ptxFileName, string kernelName, bool forceNewInstance = false)
+        private MyCudaKernel Kernel(int GPU, Assembly callingAssembly, string ptxFileName, string kernelName, bool forceNewInstance = false)
         {
-            FileInfo assemblyFile = MyConfiguration.AssemblyLookup[Assembly.GetCallingAssembly()].File;
+            FileInfo assemblyFile = GetAssemblyFile(callingAssembly);
+            string ptxFolder = assemblyFile.DirectoryName + @"\ptx\";
 
-            return Kernel(nGPU, assemblyFile.DirectoryName + @"\ptx\", ptxFileName, kernelName, forceNewInstance);
+            return Kernel(GPU, ptxFolder, ptxFileName, kernelName, forceNewInstance);
         }
 
+        private static FileInfo GetAssemblyFile(Assembly callingAssembly)
+        {
+            return MyConfiguration.AssemblyLookup[callingAssembly.FullName].File;
+        }
+
+        private static string GetKernelNameFromPtx(string ptxFileName)
+        {
+            return ptxFileName.Substring(ptxFileName.LastIndexOf('\\') + 1);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public MyCudaKernel Kernel(int nGPU, string ptxFileName, string kernelName, bool forceNewInstance = false)
+        {
+            return Kernel(nGPU, Assembly.GetCallingAssembly(), ptxFileName, kernelName, forceNewInstance);
+        }
+
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public MyCudaKernel Kernel(int nGPU, string ptxFileName, bool forceNewInstance = false)
         {
-            FileInfo assemblyFile = MyConfiguration.AssemblyLookup[Assembly.GetCallingAssembly()].File;
+            return Kernel(nGPU, Assembly.GetCallingAssembly(), ptxFileName, GetKernelNameFromPtx(ptxFileName), forceNewInstance);            
+        }
 
-            return Kernel(nGPU, assemblyFile.DirectoryName + @"\ptx\", ptxFileName, ptxFileName.Substring(ptxFileName.LastIndexOf('\\') + 1), forceNewInstance);            
+        public MyReductionKernel<T> KernelReduction<T>(MyNode owner, int nGPU, ReductionMode mode,
+            int bufferSize = MyParallelKernel<T>.BUFFER_SIZE, bool forceNewInstance = false) where T : struct
+        {
+            return new MyReductionKernel<T>(owner, nGPU, mode, bufferSize);
+        }
+
+        public MyProductKernel<T> KernelProduct<T>(MyNode owner, int nGPU, ProductMode mode,
+            int bufferSize = MyParallelKernel<T>.BUFFER_SIZE, bool forceNewInstance = false) where T : struct
+        {
+            return new MyProductKernel<T>(owner, nGPU, mode, bufferSize);
         }
 
         // !!! Warning: This is for testing purposes only.
+        [MethodImpl(MethodImplOptions.NoInlining)]
         public MyCudaKernel Kernel(string name, bool forceNewInstance = false)
         {
-            FileInfo assemblyFile = MyConfiguration.AssemblyLookup[Assembly.GetCallingAssembly()].File;
-
-            return Kernel(DevCount - 1, assemblyFile.DirectoryName + @"\ptx\", name, name.Substring(name.LastIndexOf('\\') + 1), forceNewInstance);                        
+            return Kernel(DevCount - 1, Assembly.GetCallingAssembly(), name, GetKernelNameFromPtx(name), forceNewInstance);                        
         }
+
 
         public int DevCount
         {
@@ -325,6 +379,14 @@ namespace GoodAI.Core
             for (int i = 0; i < DevCount; i++)
             {
                 m_ptxModules[i].Clear();
+            }
+        }
+
+        public void Synchronize()
+        {
+            foreach (CudaContext context in m_contexts)
+            {
+                context.Synchronize();
             }
         }
     }

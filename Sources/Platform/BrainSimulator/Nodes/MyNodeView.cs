@@ -1,26 +1,18 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Drawing;
-using System.Linq;
-using System.Text;
+﻿using GoodAI.BrainSimulator.Nodes;
+using GoodAI.Core.Configuration;
+using GoodAI.Core.Nodes;
+using GoodAI.Core.Signals;
+using GoodAI.Core.Utils;
 using Graph;
 using Graph.Items;
-using YAXLib;
-using GoodAI.Core.Nodes;
-using GoodAI.Core.Utils;
-using GoodAI.BrainSimulator.Utils;
-using System.Windows.Forms;
+using System;
+using System.Collections.Generic;
+using System.Drawing;
 using System.Reflection;
-using GoodAI.BrainSimulator.Nodes;
-using GoodAI.BrainSimulator.Forms;
-using GoodAI.Core.Memory;
-using GoodAI.Core.Signals;
-using GoodAI.Core.Configuration;
 
 namespace GoodAI.BrainSimulator.NodeView
 {
-    internal class MyNodeView : Node
+    internal class MyNodeView : Node, IDisposable
     {
         private MyNode m_node;
         public MyNode Node 
@@ -28,15 +20,29 @@ namespace GoodAI.BrainSimulator.NodeView
             get { return m_node; }
             internal set
             {
-                m_node = value;                
-                InitBranches();
+                m_node = value;
+
+                InitView();
+                m_node.NodeUpdated += OnNodeUpdated;
             }
         }
+
+        public void Dispose()
+        {
+            if (m_node != null)
+                m_node.NodeUpdated -= OnNodeUpdated;
+        }
+
+        public MyNodeConfig Config { get; private set; }
 
         protected NodeImageItem m_iconItem;
         protected NodeLabelItem m_descItem;
 
-        public MyNodeConfig NodeInfo { get; private set; }
+        private MyStatusBarItem m_statusBar;
+        private MyStatusBarItem.IconSubitem m_loadSubitem;
+        private MyStatusBarItem.IconSubitem m_saveSubitem;
+        private MyStatusBarItem.IconSubitem m_scriptSubitem;
+
         protected Image m_icon;        
 
         protected List<NodeItem> m_inputBranches = new List<NodeItem>();
@@ -46,21 +52,34 @@ namespace GoodAI.BrainSimulator.NodeView
 
         public GraphControl Owner { get; set; }
 
-        protected MyNodeView(MyNodeConfig nodeInfo, GraphControl owner) 
+        protected MyNodeView(MyNodeConfig nodeConfig, GraphControl owner) 
             : base("")
         {
-            NodeInfo = nodeInfo;
             Owner = owner;
 
-            m_icon = nodeInfo.BigImage;
+            Config = nodeConfig;
 
-            m_iconItem = new NodeImageItem(m_icon, 48, 48, false, false);
-            m_iconItem.Tag = 0;
-            m_descItem = new NodeLabelItem("");
+            m_icon = nodeConfig.BigImage;
+
+            m_iconItem = new NodeImageItem(m_icon, 48, 48, false, false)
+            {
+                IsPassive = true,
+                Tag = 0
+            };
+            m_descItem = new NodeLabelItem("")
+            {
+                IsPassive = true
+            };
 
             AddItem(m_iconItem);       
             AddItem(m_descItem);            
-        }        
+        }
+
+        protected virtual void InitView()
+        {
+            InitBranches();
+            InitStatusBar();
+        }
         
         protected virtual void InitBranches()
         {
@@ -76,67 +95,89 @@ namespace GoodAI.BrainSimulator.NodeView
                 AddItem(signalItem);
             }
 
-            if (Node.InputBranches == 1)
+            InitIoBranches(Node.InputBranches, m_iconItem.Input, m_inputBranches, nodeInfo.InputBlocks, isInput: true);
+            InitIoBranches(Node.OutputBranches, m_iconItem.Output, m_outputBranches, nodeInfo.OutputBlocks, isInput: false);
+        }
+
+        private void InitIoBranches(int branchCount, NodeConnector connector, ICollection<NodeItem> branchList,
+            IList<PropertyInfo> blocks, bool isInput)
+        {
+            if (branchCount == 1)
             {
-                m_iconItem.Input.Enabled = true;
-                m_inputBranches.Add(m_iconItem);
+                connector.Enabled = true;
+                branchList.Add(m_iconItem);
             }
             else
             {
-                for (int i = 0; i < Node.InputBranches; i++)
+                for (int i = 0; i < branchCount; i++)
                 {
                     string name = (i + 1) + "";
 
                     if (Node is MyWorkingNode)
                     {
-                        name = Node.GetInfo().InputBlocks[i].Name;
+                        name = blocks[i].Name;
                     }
 
-                    NodeLabelItem branch = new NodeLabelItem(MyProject.ShortenMemoryBlockName(name), true, false);
-                    branch.Tag = i;
-
-                    m_inputBranches.Add(branch);
-                    AddItem(branch);
-                } 
-            }
-
-            if (Node.OutputBranches == 1)
-            {
-                m_iconItem.Output.Enabled = true;
-                m_outputBranches.Add(m_iconItem);
-            }
-            else
-            {
-                for (int i = 0; i < Node.OutputBranches; i++)
-                {
-                    string name = (i + 1) + "";
-
-                    if (Node is MyWorkingNode)
+                    NodeLabelItem branch = new NodeLabelItem(MyProject.ShortenMemoryBlockName(name), isInput, !isInput)
                     {
-                        name = Node.GetInfo().OutputBlocks[i].Name;
-                    }
+                        Tag = i,
+                        IsPassive = true
+                    };
 
-                    NodeLabelItem branch = new NodeLabelItem(MyProject.ShortenMemoryBlockName(name), false, true);
-                    branch.Tag = i;
-
-                    m_outputBranches.Add(branch);
+                    branchList.Add(branch);
                     AddItem(branch);
                 }
             }
         }
 
+        private void OnNodeUpdated(object node, EventArgs e)
+        {
+            UpdateView();
+        }
+
+        private void InitStatusBar()
+        {
+            this.HasStatusBar = true;
+
+            m_statusBar = new MyStatusBarItem();
+
+            m_loadSubitem = m_statusBar.AddIcon(Properties.Resources.open_mb_12);
+            m_saveSubitem = m_statusBar.AddIcon(Properties.Resources.save_mb_12);
+            m_scriptSubitem = m_statusBar.AddIcon(Properties.Resources.text_12xMD);
+
+            UpdateStatusBar();
+            
+            AddItem(m_statusBar, orderKey: 1000);  // keep it at the bottom
+        }
+
+        private void UpdateStatusBar()
+        {
+            m_statusBar.TextItem = Node.TopologicalOrder.ToString();
+
+            var workingNode = Node as MyWorkingNode;
+            if (workingNode == null)
+                return;
+
+            m_loadSubitem.Enabled = workingNode.LoadOnStart;
+            m_saveSubitem.Enabled = workingNode.SaveOnStop;
+            m_scriptSubitem.Enabled = workingNode is IScriptableNode;
+        }
+
         public virtual void UpdateView()
         {
-            if (Node != null)
-            {
-                Title = Node.Name;
-                m_descItem.Text = Node.Description;
+            if (Node == null)
+                return;
 
-                if (Node.Location != null)
-                {
-                    Location = new PointF(Node.Location.X, Node.Location.Y);
-                }
+            Title = Node.Name;
+            m_descItem.Text = Node.Description;
+
+            if (Node.Location != null)
+            {
+                Location = new PointF(Node.Location.X, Node.Location.Y);
             }
+
+            UpdateStatusBar();
+            Owner.Invalidate();
         }           
 
         public override void OnEndDrag()
@@ -176,7 +217,24 @@ namespace GoodAI.BrainSimulator.NodeView
             {
                 return InputBranchChangeNeeded || OutputBranchChangeNeeded;
             }
-        }      
+        }
+
+        public Color BackgroundColor
+        {
+            get
+            {
+                return (background as SolidBrush).Color;
+            }
+            set
+            {
+                background = new SolidBrush(value);
+            }
+        }
+
+        public void SetDefaultBackground()
+        {
+            BackgroundColor = Color.LightGray;
+        }
 
         public static MyNodeView CreateNodeView(Type nodeType, GraphControl owner)
         {
@@ -186,6 +244,10 @@ namespace GoodAI.BrainSimulator.NodeView
             {
                 return new MyUserInputView(config, owner);
             }
+            if (typeof(DeviceInput).IsAssignableFrom(nodeType))
+            {
+                return new DeviceInputView(config, owner);
+            }
             if (typeof(MyGateInput).IsAssignableFrom(nodeType))
             {
                 return new MyGateInputView(config, owner);
@@ -194,8 +256,8 @@ namespace GoodAI.BrainSimulator.NodeView
             {
                 return new MyNodeGroupView(config, owner);
             }
-            else if (typeof(MyFork).IsAssignableFrom(nodeType) ||
-                typeof(MyJoin).IsAssignableFrom(nodeType))
+            else if (typeof(MyFork).IsAssignableFrom(nodeType) 
+                || typeof(IMyVariableBranchViewNodeBase).IsAssignableFrom(nodeType))
             {
                 return new MyVariableBranchView(config, owner);
             }
@@ -212,6 +274,5 @@ namespace GoodAI.BrainSimulator.NodeView
 
             return nodeView;
         }
-        
     }
 }

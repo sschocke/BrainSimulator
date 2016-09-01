@@ -1,16 +1,11 @@
-﻿using GoodAI.Core.Configuration;
+﻿using GoodAI.BrainSimulator.Nodes;
+using GoodAI.Core.Configuration;
 using GoodAI.Core.Nodes;
 using GoodAI.Core.Signals;
-using GoodAI.Core.Utils;
-using GoodAI.BrainSimulator.Nodes;
 using Graph;
 using Graph.Items;
-using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace GoodAI.BrainSimulator.NodeView
 {
@@ -20,8 +15,11 @@ namespace GoodAI.BrainSimulator.NodeView
 
         protected virtual void AddInputBranch()
         {
-            NodeLabelItem branch = new NodeLabelItem("Input " + (m_inputBranches.Count + 1), true, false);
-            branch.Tag = m_inputBranches.Count;
+            NodeLabelItem branch = new NodeLabelItem("Input " + (m_inputBranches.Count + 1), true, false)
+            {
+                Tag = m_inputBranches.Count,
+                IsPassive = true
+            };
 
             m_inputBranches.Add(branch);
             AddItem(branch);
@@ -45,8 +43,11 @@ namespace GoodAI.BrainSimulator.NodeView
 
         protected virtual void AddOutputBranch()
         {
-            NodeLabelItem branch = new NodeLabelItem("Output " + (m_outputBranches.Count + 1), false, true);
-            branch.Tag = m_outputBranches.Count;
+            NodeLabelItem branch = new NodeLabelItem("Output " + (m_outputBranches.Count + 1), false, true)
+            {
+                Tag = m_outputBranches.Count,
+                IsPassive = true
+            };
 
             m_outputBranches.Add(branch);
             AddItem(branch);
@@ -119,6 +120,14 @@ namespace GoodAI.BrainSimulator.NodeView
                 AddOutputBranch();
             }    
         }
+
+        public override void UpdateView()
+        {
+            base.UpdateView();
+
+            if (BranchChangeNeeded)
+                UpdateBranches();
+        }
     }
 
     internal class MyNodeGroupView : MyVariableBranchView
@@ -129,6 +138,7 @@ namespace GoodAI.BrainSimulator.NodeView
         {
             NodeLabelItem branch = new MyNodeLabelItem((Node as MyNodeGroup).GroupInputNodes[m_inputBranches.Count] , true, false);
             branch.Tag = m_inputBranches.Count;
+            branch.IsPassive = true;
 
             m_inputBranches.Add(branch);
             AddItem(branch);
@@ -138,6 +148,7 @@ namespace GoodAI.BrainSimulator.NodeView
         {
             NodeLabelItem branch = new MyNodeLabelItem((Node as MyNodeGroup).GroupOutputNodes[m_outputBranches.Count], false, true);
             branch.Tag = m_outputBranches.Count;
+            branch.IsPassive = true;
 
             m_outputBranches.Add(branch);
             AddItem(branch);

@@ -2,24 +2,36 @@
 using GoodAI.Core.Nodes;
 using GoodAI.Core.Utils;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace GoodAI.Core.Observers
 {
     public abstract class MyAbstractMemoryBlockObserver : MyObserver<MyAbstractMemoryBlock>
     {
+        private int m_lastCount = 0;
+
+        protected override void PrepareExecution()
+        {
+            if (Target.Count != m_lastCount)
+            {
+                OnCountChanged();
+                m_lastCount = Target.Count;
+            }
+        }
+
+        protected virtual void OnCountChanged()
+        {
+            Reset();
+        }
+
         public override string GetTargetName(MyNode declaredOwner)
         {
             if (declaredOwner == Target.Owner)
             {
-                return Target.Owner.Name + " - " + Target.Name;
+                return Target.Owner.Name + ": " + Target.Name;
             }
             else
             {
-                return declaredOwner.Name + " (" + Target.Owner.Name + ") - " + Target.Name;
+                return declaredOwner.Name + " (" + Target.Owner.Name + "): " + Target.Name;
             }
         }
 

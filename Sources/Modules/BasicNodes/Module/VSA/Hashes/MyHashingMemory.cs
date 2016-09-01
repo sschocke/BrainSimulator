@@ -1,21 +1,20 @@
-﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
+﻿using GoodAI.Core;
 using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
 using GoodAI.Core.Task;
-using GoodAI.Modules.Transforms;
 using GoodAI.Core.Utils;
+using GoodAI.Modules.Transforms;
+using System;
+using System.ComponentModel;
 using YAXLib;
-using GoodAI.Core;
 
 namespace GoodAI.Modules.VSA.Hashes
 {
     /// <author>GoodAI</author>
     /// <meta>mm</meta>
-    ///<status>WIP</status>
-    ///<summary></summary>
-    ///<description></description>
+    /// <status>WIP</status>
+    /// <summary>A large vector -- memory -- that can be updated by adding a vector of values to specific indices.</summary>
+    /// <description></description>
     public class MyHashingMemory : MyWorkingNode
     {
         public enum AddToIndicesOperation
@@ -86,6 +85,9 @@ namespace GoodAI.Modules.VSA.Hashes
         public MyAddToIndicesTask AddTask { get; private set; }
 
 
+        /// <summary>
+        /// Randomly initializes the contents of the memory.
+        /// </summary>
         [Description("Randomize memory contents"), MyTaskInfo(OneShot = true, Disabled = true)]
         public class RandomInitTask : MyTask<MyHashingMemory>
         {
@@ -112,14 +114,17 @@ namespace GoodAI.Modules.VSA.Hashes
         }
 
 
+        /// <summary>
+        /// Performs the mapping to the memory.
+        /// </summary>
         [Description("Add Values to Indices")]
         public class MyAddToIndicesTask : MyTask<MyHashingMemory>
         {
             private MyCudaKernel _polynomialFuncKernel;
             private MyCudaKernel _combineVectorsKernel;
             private MyCudaKernel _mapToIdcsKernel;
-            private MyCudaKernel _dotKernel;
             private MyCudaKernel _constMulKernel;
+            private MyProductKernel<float> _dotKernel;
 
 
             [MyBrowsable, Category("Structure")]
@@ -168,7 +173,7 @@ namespace GoodAI.Modules.VSA.Hashes
                     _combineVectorsKernel.SetupExecution(Owner.SymbolSize);
                     _mapToIdcsKernel = MyKernelFactory.Instance.Kernel(nGPU, @"Common\CombineVectorsKernel", "MapToIdcs");
                     _mapToIdcsKernel.SetupExecution(Owner.SymbolSize);
-                    _dotKernel = MyReductionFactory.Kernel(nGPU, MyReductionFactory.Mode.f_DotProduct_f);
+                    _dotKernel = MyKernelFactory.Instance.KernelProduct<float>(Owner, nGPU, ProductMode.f_DotProduct_f);
 
                 }
                 else
@@ -213,7 +218,9 @@ namespace GoodAI.Modules.VSA.Hashes
                             src = Temp.GetDevicePtr(Owner);
                         }
 
-                        _dotKernel.Run(Temp, 2 * symbolSize, src, src, symbolSize);
+                        //ZXC _dotKernel.Run(Temp, 2 * symbolSize, src, src, symbolSize, /* distributed: */ 0);
+                        _dotKernel.outOffset = 2 * symbolSize;
+                        _dotKernel.Run(Temp, src, src, symbolSize);
 
                         _mapToIdcsKernel.Run(src, Temp.GetDevicePtr(Owner.GPU, 2 * symbolSize), index, Memory, symbolSize);
                     }

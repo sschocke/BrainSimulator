@@ -2,7 +2,6 @@
 using NDesk.Options;
 using System;
 using System.Collections.Generic;
-using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -19,8 +18,10 @@ namespace GoodAI.Core.Configuration
         public static Dictionary<Type, MyNodeConfig> KnownNodes { get; private set; }
         public static Dictionary<Type, MyWorldConfig> KnownWorlds { get; private set; }
 
+        public static Dictionary<string, MyCategoryConfig> KnownCategories { get; private set; }
+
         public static List<MyModuleConfig> Modules { get; private set; }
-        public static Dictionary<Assembly, MyModuleConfig> AssemblyLookup { get; private set; }
+        public static Dictionary<string, MyModuleConfig> AssemblyLookup { get; private set; }
 
         public static List<string> ModulesSearchPath { get; private set; }
         public static string OpenOnStartupProjectName { get; private set; }
@@ -32,19 +33,20 @@ namespace GoodAI.Core.Configuration
             GlobalPTXFolder = MyResources.GetEntryAssemblyPath() + @"\modules\GoodAI.BasicNodes\ptx\";
             KnownNodes = new Dictionary<Type, MyNodeConfig>();
             KnownWorlds = new Dictionary<Type, MyWorldConfig>();
+            KnownCategories = new Dictionary<string, MyCategoryConfig>();
             Modules = new List<MyModuleConfig>();
 
             ModulesSearchPath = new List<string>();
-            AssemblyLookup = new Dictionary<Assembly, MyModuleConfig>();
+            AssemblyLookup = new Dictionary<string, MyModuleConfig>();
         }
 
         public static void SetupModuleSearchPath()
         {
-            //SearchPath.Add(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData)); //add bs folder name
+            var modulesPath = Path.Combine(MyResources.GetEntryAssemblyPath(), MODULES_PATH);
 
-            if (Directory.Exists(MyResources.GetEntryAssemblyPath() + "\\" + MODULES_PATH))
+            if (Directory.Exists(modulesPath))
             {
-                foreach (string modulePath in Directory.GetDirectories(MyResources.GetEntryAssemblyPath() + "\\" + MODULES_PATH))
+                foreach (string modulePath in Directory.GetDirectories(modulesPath))
                 {
                     ModulesSearchPath.Add(modulePath);
                 }
@@ -67,7 +69,13 @@ namespace GoodAI.Core.Configuration
                 extraParams = options.Parse(Environment.GetCommandLineArgs().Skip(1));
                 if (extraParams.Count > 0)
                 {
-                    OpenOnStartupProjectName = Path.ChangeExtension(extraParams[0], ".brain");
+                    string brainFile = extraParams[0];
+                    string extension = Path.GetExtension(brainFile);
+
+                    if (extension != ".brain" && extension != ".brainz")
+                        brainFile = Path.ChangeExtension(brainFile, ".brain");
+
+                    OpenOnStartupProjectName = brainFile;
                 }
             }
             catch (OptionException e)
@@ -76,42 +84,46 @@ namespace GoodAI.Core.Configuration
             }
         }
 
-        public static void LoadModules()
+        public static List<FileInfo> ListModules()
         {
-            MyLog.INFO.WriteLine("Loading system modules...");
-
-            AddModuleFromAssembly(new FileInfo(MyResources.GetEntryAssemblyPath() + "\\" + CORE_MODULE_NAME), true);                     
-
-            MyLog.INFO.WriteLine("Loading custom modules...");
+            var moduleList = new List<FileInfo>();
 
             foreach (string modulePath in ModulesSearchPath)
             {
-                FileInfo info = new FileInfo(modulePath);
+                var fileInfo = new FileInfo(modulePath);
+                if ((fileInfo.Attributes & FileAttributes.Directory) > 0)
+                    fileInfo = new FileInfo(Path.Combine(fileInfo.FullName, fileInfo.Name + ".dll"));
 
-                if ((info.Attributes & FileAttributes.Directory) > 0)
-                {
-                    info = new FileInfo(Path.Combine(info.FullName, info.Name + ".dll"));
-                }
+                if (!fileInfo.Exists)
+                    MyLog.WARNING.WriteLine("Module assembly not found: " + fileInfo);
 
-                if (info.Exists)
-                {
-                    AddModuleFromAssembly(info);
-                }
-                else
-                {
-                    MyLog.ERROR.WriteLine("Module assembly not found: " + info);
-                }
+                moduleList.Add(fileInfo);
             }
+
+            return moduleList;
+        }
+
+        public static void LoadModules()
+        {
+            MyLog.INFO.WriteLine("Loading system modules...");
+            AddModuleFromAssembly(
+                new FileInfo(Path.Combine(MyResources.GetEntryAssemblyPath(), CORE_MODULE_NAME)), basicNode: true);
+
+            if (ModulesSearchPath.Count == 0)
+                throw new InvalidOperationException("ModulesSearchPath must not be empty.");
+
+            MyLog.INFO.WriteLine("Loading custom modules...");
+            ListModules().ForEach(moduleFileInfo => AddModuleFromAssembly(moduleFileInfo));
         }
 
         private static void AddModuleFromAssembly(FileInfo file, bool basicNode = false)
         {
             try
-            {              
-                MyModuleConfig moduleConfig = MyModuleConfig.LoadModuleConfig(file);                
+            {
+                MyModuleConfig moduleConfig = MyModuleConfig.LoadModuleConfig(file);
 
                 Modules.Add(moduleConfig);
-                AssemblyLookup[moduleConfig.Assembly] = moduleConfig;
+                AssemblyLookup[moduleConfig.Assembly.FullName] = moduleConfig;
 
                 if (moduleConfig.NodeConfigList != null)
                 {
@@ -139,17 +151,30 @@ namespace GoodAI.Core.Configuration
                     }
                 }
 
-                MyLog.INFO.WriteLine("Module loaded: " + file.Name 
-                    + (moduleConfig.Conversion != null ? " (version=" + moduleConfig.GetXmlVersion() + ")" : " (no versioning)"));                
+                if (moduleConfig.CategoryList != null)
+                {
+                    foreach (MyCategoryConfig categoryConfig in moduleConfig.CategoryList)
+                    {
+                        KnownCategories[categoryConfig.Name] = categoryConfig;
+                    }
+                }
+
+                MyLog.INFO.WriteLine("Module loaded: " + file.Name
+                                     +
+                                     (moduleConfig.Conversion != null
+                                         ? " (version=" + moduleConfig.GetXmlVersion() + ")"
+                                         : " (no versioning)"));
             }
             catch (Exception e)
             {
-                MyLog.ERROR.WriteLine("Module loading failed: " + e.Message);
-
                 if (basicNode)
                 {
                     throw new MyModuleLoadingException("Core module loading failed (" + e.Message + ")", e);
                 }
+
+                // We don't report the nodes.xml missing - the dll could still contain UI extensions.
+                if (!(e is FileNotFoundException))
+                    MyLog.ERROR.WriteLine("Module loading failed: " + e.Message);
             }
         }
     }

@@ -1,17 +1,10 @@
 ﻿using GoodAI.Core.Memory;
+using GoodAI.Core.Nodes;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using ManagedCuda.CudaFFT;
-using GoodAI.Core.Nodes;
-using ManagedCuda.VectorTypes;
 using System.ComponentModel;
 using YAXLib;
-using ManagedCuda;
 
 namespace GoodAI.Modules.VSA
 {
@@ -76,7 +69,7 @@ namespace GoodAI.Modules.VSA
             base.Validate(validator);
             if (FirstInput != null && SecondInput != null)
             {
-                validator.AssertError(FirstInput.Count == SecondInput.Count, this, "Operand sizes differ!");
+                validator.AssertError(SecondInput.Count % FirstInput.Count == 0, this, "Operand sizes differ!");
             }
         }
 

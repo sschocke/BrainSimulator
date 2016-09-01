@@ -2,8 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Xml.Linq;
 using YAXLib;
 
@@ -14,7 +12,10 @@ namespace GoodAI.Core.Utils
         internal const string NO_PROPERTY_NAME_KEY = "#NO_PROPERTY_NAME#";
 
         public void SerializeToElement(Dictionary<string, MyTask> tasksToSerialize, XElement elemToFill)
-        {            
+        {
+            if (tasksToSerialize == null)
+                return;
+
             foreach (string taskPropName in tasksToSerialize.Keys) {
 
                 MyTask task = tasksToSerialize[taskPropName];

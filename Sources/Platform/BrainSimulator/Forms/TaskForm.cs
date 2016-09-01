@@ -1,37 +1,42 @@
-﻿using GoodAI.Core;
-using GoodAI.Core.Nodes;
+﻿using GoodAI.Core.Nodes;
 using GoodAI.Core.Task;
-using GoodAI.Modules.Transforms;
 using GoodAI.Core.Utils;
 using System;
-using System.Collections.Generic;
 using System.ComponentModel;
-using System.Data;
 using System.Drawing;
-using System.Linq;
 using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Windows.Forms.VisualStyles;
 using WeifenLuo.WinFormsUI.Docking;
 
 namespace GoodAI.BrainSimulator.Forms
 {
-    public partial class TaskForm : DockContent
+    public partial class TaskForm : DockContent, INotifyPropertyChanged
     {
-        private MainForm m_mainForm;
+        public event PropertyChangedEventHandler PropertyChanged;
+
+        private void OnPropertyChanged(object target, string propertyName = null)
+        {
+            if (PropertyChanged != null)
+                PropertyChanged(target, new PropertyChangedEventArgs(propertyName));
+        }
+
+        private readonly MainForm m_mainForm;
         private MyWorkingNode m_target;
         private bool isUpdating;
 
         private int lastSelectedTaskIndex = -1;
 
+        private ListViewHitTestInfo m_lastHitTest;
+        private const string EnabledPropertyName = "Enabled";
+
         public MyWorkingNode Target
         {
             get { return m_target; }
-            set 
+            set
             {
-                if (Target != null && value != null && value.GetType() == Target.GetType() && listView.SelectedIndices.Count == 1)
+                if (Target != null && value != null && value.GetType() == Target.GetType() &&
+                    listView.SelectedIndices.Count == 1)
                 {
                     lastSelectedTaskIndex = listView.SelectedIndices[0];
                 }
@@ -44,12 +49,12 @@ namespace GoodAI.BrainSimulator.Forms
                     lastSelectedTaskIndex = -1;
                 }
 
-                m_target = value;                
-                UpdateTaskView();
+                m_target = value;
+                RefreshView();
             }
         }
 
-        private void UpdateTaskView() 
+        public void RefreshView()
         {
             isUpdating = true;
 
@@ -62,12 +67,12 @@ namespace GoodAI.BrainSimulator.Forms
 
                     if (task != null)
                     {
-                        ListViewItem item = new ListViewItem(new string[] { task.Name, task.OneShot.ToString() });
+                        ListViewItem item = new ListViewItem(new string[] {task.Name, task.OneShot ? "Init" : ""});
                         item.Checked = task.Enabled;
-                        item.Tag = task;                        
+                        item.Tag = task;
                         listView.Items.Add(item);
                     }
-                }               
+                }
             }
 
             isUpdating = false;
@@ -81,6 +86,8 @@ namespace GoodAI.BrainSimulator.Forms
             {
                 m_mainForm.TaskPropertyView.Target = null;
             }
+
+            RefreshDashboardButton();
         }
 
         private void UpdateTasksEnableState()
@@ -89,8 +96,9 @@ namespace GoodAI.BrainSimulator.Forms
 
             foreach (ListViewItem item in listView.Items)
             {
+                if (item == null) continue;
                 MyTask task = item.Tag as MyTask;
-                item.Checked = task.Enabled;           
+                item.Checked = task.Enabled;
             }
 
             isUpdating = false;
@@ -99,7 +107,7 @@ namespace GoodAI.BrainSimulator.Forms
         public TaskForm(MainForm mainForm)
         {
             m_mainForm = mainForm;
-            
+
             InitializeComponent();
         }
 
@@ -108,10 +116,26 @@ namespace GoodAI.BrainSimulator.Forms
             if (!isUpdating)
             {
                 MyTask task = e.Item.Tag as MyTask;
-                task.Enabled = e.Item.Checked;
-                
-                UpdateTasksEnableState();
-            }            
+
+                if (!task.DesignTime)
+                {
+                    task.Enabled = e.Item.Checked;
+
+                    object target = task;
+                    string propertyName = EnabledPropertyName;
+                    if (!string.IsNullOrEmpty(task.TaskGroupName))
+                    {
+                        target = task.TaskGroup;
+                        propertyName = task.TaskGroupName;
+                    }
+
+                    OnPropertyChanged(target, propertyName);
+
+                    UpdateTasksEnableState();
+
+                    task.GenericOwner.Updated();
+                }
+            }
         }
 
         private void listView_SelectedIndexChanged(object sender, EventArgs e)
@@ -120,70 +144,120 @@ namespace GoodAI.BrainSimulator.Forms
             {
                 m_mainForm.TaskPropertyView.Target = listView.SelectedItems[0].Tag as MyTask;
             }
+            RefreshDashboardButton();
         }
 
         private static readonly Brush HL_BRUSH = new SolidBrush(SystemColors.Highlight);
         private static readonly Pen LINE_PEN = new Pen(Brushes.LightGray);
 
         private void listView_DrawSubItem(object sender, DrawListViewSubItemEventArgs e)
-        {            
+        {
             Rectangle bounds = e.SubItem.Bounds;
 
             if (e.ColumnIndex == 0)
-            {
                 bounds.Width = bounds.X + e.Item.SubItems[1].Bounds.X;
-            }
 
-            //toggle colors if the item is highlighted 
-            if (e.Item.Selected && e.Item.ListView.Focused)
-            {
-                e.SubItem.BackColor = SystemColors.Highlight;
-                e.SubItem.ForeColor = e.Item.ListView.BackColor;
-            }
-            else if (e.Item.Selected && !e.Item.ListView.Focused)
-            {
-                e.SubItem.BackColor = SystemColors.Control;
-                e.SubItem.ForeColor = e.Item.ListView.ForeColor;
-            }
-            else
-            {
-                e.SubItem.BackColor = e.Item.ListView.BackColor;
-                e.SubItem.ForeColor = e.Item.ListView.ForeColor;
-            }
+            var task = e.Item.Tag as MyTask;
 
-            // Draw the standard header background.
-            e.DrawBackground();
+            // Toggle colors if the item is highlighted.
+            DrawBackgroundAndText(e, task);
 
             int xOffset = 0;
 
             if (e.ColumnIndex == 0)
             {
-                Point glyphPoint = new Point(4, e.Item.Position.Y + 2);
-
-                MyTask task = e.Item.Tag as MyTask;
-
-                if (string.IsNullOrEmpty(task.TaskGroupName)) 
-                {
-                    CheckBoxState state = e.Item.Checked ? CheckBoxState.CheckedNormal : CheckBoxState.UncheckedNormal;
-                    CheckBoxRenderer.DrawCheckBox(e.Graphics, glyphPoint, state);
-                    xOffset = CheckBoxRenderer.GetGlyphSize(e.Graphics, state).Width + 4;    
-                }
-                else 
-                {
-                    RadioButtonState state = e.Item.Checked ? RadioButtonState.CheckedNormal : RadioButtonState.UncheckedNormal;
-                    RadioButtonRenderer.DrawRadioButton(e.Graphics, glyphPoint, state);
-                    xOffset = RadioButtonRenderer.GetGlyphSize(e.Graphics, state).Width + 4;
-                }
+                DrawCheckBox(e, task, out xOffset);
+            }
+            else if (e.ColumnIndex == 1 && task.DesignTime)
+            {                
+                DrawPushButton(e, task);
             }
             
-            //add a 2 pixel buffer the match default behavior
-            Rectangle rec = new Rectangle(e.Bounds.X + 2 + xOffset, e.Bounds.Y + 2, e.Bounds.Width - 4, e.Bounds.Height - 4);
+            // Add a 2 pixel buffer the match default behavior.
+            Rectangle rec = new Rectangle(e.Bounds.X + 2 + xOffset, e.Bounds.Y + 2, e.Bounds.Width - 4,
+                e.Bounds.Height - 4);
 
-            //TODO  Confirm combination of TextFormatFlags.EndEllipsis and TextFormatFlags.ExpandTabs works on all systems.  MSDN claims they're exclusive but on Win7-64 they work.
-            TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.ExpandTabs | TextFormatFlags.SingleLine;
+            // TODO: Confirm combination of TextFormatFlags.EndEllipsis and TextFormatFlags.ExpandTabs works on all systems.
+            // MSDN claims they're exclusive but on Win7-64 they work.
+            TextFormatFlags flags = TextFormatFlags.Left | TextFormatFlags.EndEllipsis | TextFormatFlags.ExpandTabs |
+                                    TextFormatFlags.SingleLine;
 
-            //If a different tabstop than the default is needed, will have to p/invoke DrawTextEx from win32.
+            // If a different tabstop than the default is needed, will have to p/invoke DrawTextEx from win32.
             TextRenderer.DrawText(e.Graphics, e.SubItem.Text, e.Item.ListView.Font, rec, e.SubItem.ForeColor, flags);         
+        }
+
+        private static void DrawCheckBox(DrawListViewSubItemEventArgs e, MyTask task, out int checkboxWidth)
+        {
+            Point glyphPoint = new Point(4, e.Item.Position.Y + 2);
+
+            if (!string.IsNullOrEmpty(task.TaskGroupName))
+            {
+                RadioButtonState state;
+                if (task.Forbidden)
+                    state = RadioButtonState.UncheckedDisabled;
+                else
+                    state = e.Item.Checked ? RadioButtonState.CheckedNormal : RadioButtonState.UncheckedNormal;
+
+                RadioButtonRenderer.DrawRadioButton(e.Graphics, glyphPoint, state);
+                checkboxWidth = RadioButtonRenderer.GetGlyphSize(e.Graphics, state).Width + 4;
+            }
+            else if (task.DesignTime)
+            {
+                checkboxWidth = CheckBoxRenderer.GetGlyphSize(e.Graphics, CheckBoxState.UncheckedNormal).Width + 4;
+            }
+            else
+            {
+                CheckBoxState state;
+                if (task.Forbidden)
+                    state = CheckBoxState.UncheckedDisabled;
+                else
+                    state = e.Item.Checked ? CheckBoxState.CheckedNormal : CheckBoxState.UncheckedNormal;
+
+                CheckBoxRenderer.DrawCheckBox(e.Graphics, glyphPoint, state);
+                checkboxWidth = CheckBoxRenderer.GetGlyphSize(e.Graphics, state).Width + 4;
+            }
+        }
+
+        private void DrawPushButton(DrawListViewSubItemEventArgs e, MyTask task)
+        {
+            PushButtonState buttonState = PushButtonState.Disabled;
+
+            if (m_mainForm.SimulationHandler.CanStart && task.Enabled)
+            {
+                buttonState =
+                    m_lastHitTest != null && e.Item == m_lastHitTest.Item && e.SubItem == m_lastHitTest.SubItem
+                        ? PushButtonState.Pressed
+                        : PushButtonState.Normal;
+            }
+
+            ButtonRenderer.DrawButton(e.Graphics, e.Bounds, "Execute", listView.Font, false, buttonState);
+        }
+
+        private static void DrawBackgroundAndText(DrawListViewSubItemEventArgs e, MyTask task)
+        {
+            Color listBackColor = e.Item.ListView.BackColor;
+            Color foreColor;
+            Color backColor;
+
+            if (e.Item.Selected && e.Item.ListView.Focused)
+            {
+                backColor = SystemColors.Highlight;
+                foreColor = listBackColor;
+            }
+            else
+            {
+                foreColor = task.Forbidden ? SystemColors.GrayText : e.Item.ListView.ForeColor;
+                backColor = listBackColor;
+
+                if ((e.Item.Selected && !e.Item.ListView.Focused) || task.Forbidden)
+                    backColor = SystemColors.Control;
+            }
+
+            e.SubItem.ForeColor = foreColor;
+            e.SubItem.BackColor = backColor;
+
+            // Draw the standard header background.
+            e.DrawBackground();
         }
 
         private void listView_DrawColumnHeader(object sender, DrawListViewColumnHeaderEventArgs e)
@@ -202,6 +276,90 @@ namespace GoodAI.BrainSimulator.Forms
                 : base()
             {
                 DoubleBuffered = true;
+            }
+        }
+
+        private void listView_Click(object sender, EventArgs e)
+        {
+            Point mousePos = listView.PointToClient(Control.MousePosition);
+            ListViewHitTestInfo hitTest = listView.HitTest(mousePos);
+            int columnIndex = hitTest.Item.SubItems.IndexOf(hitTest.SubItem);
+
+            if (columnIndex == 1)
+            {
+                MyTask task = hitTest.Item.Tag as MyTask;
+
+                if (m_mainForm.SimulationHandler.CanStart && task.Enabled && task.DesignTime)
+                {
+                    task.Execute();
+                }
+            }
+        }
+
+        private void listView_MouseDown(object sender, MouseEventArgs e)
+        {
+            Point mousePos = listView.PointToClient(Control.MousePosition);
+            m_lastHitTest = listView.HitTest(mousePos);
+            listView.Invalidate();
+        }
+
+        private void listView_MouseUp(object sender, MouseEventArgs e)
+        {
+            m_lastHitTest = null;
+            listView.Invalidate();
+        }
+
+        private void listView_MouseLeave(object sender, EventArgs e)
+        {
+            m_lastHitTest = null;
+            listView.Invalidate();
+        }
+
+        private void TaskForm_Load(object sender, EventArgs e)
+        {
+            m_mainForm.SimulationHandler.StateChanged += SimulationHandler_StateChanged;
+            RefreshDashboardButton();
+        }
+
+        void SimulationHandler_StateChanged(object sender, Core.Execution.MySimulationHandler.StateEventArgs e)
+        {
+            listView.Invalidate();
+        }
+
+        private void TaskForm_FormClosed(object sender, FormClosedEventArgs e)
+        {
+            m_mainForm.SimulationHandler.StateChanged -= SimulationHandler_StateChanged;
+        }
+
+        private void dashboardButton_CheckedChanged(object sender, System.EventArgs e)
+        {
+            ListViewItem selectedItem = listView.SelectedItems[0];
+
+            var task = selectedItem.Tag as MyTask;
+
+            if (string.IsNullOrEmpty(task.TaskGroupName))
+                m_mainForm.DashboardPropertyToggle(task, EnabledPropertyName, dashboardButton.Checked);
+            else
+                m_mainForm.DashboardPropertyToggle(task.TaskGroup, task.TaskGroupName, dashboardButton.Checked);
+        }
+
+        private void RefreshDashboardButton()
+        {
+            if (listView.SelectedItems.Count == 1 && Target is MyWorkingNode)
+            {
+                ListViewItem selectedItem = listView.SelectedItems[0];
+
+                var task = selectedItem.Tag as MyTask;
+
+                dashboardButton.Enabled = true;
+                if (string.IsNullOrEmpty(task.TaskGroupName))
+                    dashboardButton.Checked = m_mainForm.CheckDashboardContains(task, EnabledPropertyName);
+                else
+                    dashboardButton.Checked = m_mainForm.CheckDashboardContains(task.TaskGroup, task.TaskGroupName);
+            }
+            else
+            {
+                dashboardButton.Enabled = false;
             }
         }
     }

@@ -1,13 +1,6 @@
 ﻿using GoodAI.Core.Nodes;
 using GoodAI.Core.Utils;
 using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using WeifenLuo.WinFormsUI.Docking;
 
@@ -19,10 +12,10 @@ namespace GoodAI.BrainSimulator.Forms
 
         private MainForm m_mainForm;
 
-        public ValidationForm(MainForm mainForm)
+        public ValidationForm(MainForm mainForm, MyValidator validator)
         {
             InitializeComponent();
-            Validator = new MyValidator();
+            Validator = validator;
 
             m_mainForm = mainForm;
         }

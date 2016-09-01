@@ -1,6 +1,7 @@
 site_name: Brain Sim docs
 site_author: GoodAI
 repo_url: https://github.com/GoodAI
+site_favicon: favicon.ico
 #theme: mkdocs, bootstrap, cosmo, flatly, spacelab, united, yeti
 theme_dir: 'goodai_theme'
 pages:
@@ -10,15 +11,19 @@ pages:
 - Observers: 'observer.md'
 #- ['nodes.md', 'Nodes']
 - Guides:
-    - How to create a module: 'guides/steps.md'
+    - How to create a module linked to binaries: 'guides/steps.md'
+    - How to create a module linked to source code: 'guides/module_with_project_deps.md'
+    - How to share a module: 'guides/sharing.md'
     - Persistence: 'guides/persistence.md'
     - Math Operations: 'guides/matrix.md'
     - Neural Network: 'guides/neuralnetwork.md'
     - Discrete Q-Learning: 'guides/discreteqlearning.md'
     - Image Processing: 'guides/improc.md'
     - Restricted Boltzmann Machine: 'guides/rbm.md'
+    - Automated node and brain testing: 'guides/brain_testing.md'
 
 - Examples:
+    - Worlds: 'examples/worlds.md'
     - Matrix Node: 'examples/matrix.md'
     - Neural Network: 'examples/neuralnetwork.md'
     - Discrete Q-Learning: 'examples/discreteqlearning.md'
@@ -27,6 +32,8 @@ pages:
     - Motor Control: 'examples/motor.md'
     - Vector Symbolic Architecture: 'examples/binding.md'
     - Nupic Node: 'examples/nupic.md'
+    - Loop group: 'examples/loopgroup.md'
+    - Genetic Training World: 'examples/genetic.md'
 
 - Changelog: 'changelog.md'
 markdown_extensions:

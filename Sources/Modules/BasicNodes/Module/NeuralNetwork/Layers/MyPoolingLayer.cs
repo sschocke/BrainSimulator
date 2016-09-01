@@ -1,8 +1,8 @@
-﻿using GoodAI.Core.Utils;
-using System.ComponentModel;
+﻿using CustomModels.NeuralNetwork.Tasks;
 using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
-using CustomModels.NeuralNetwork.Tasks;
+using GoodAI.Core.Utils;
+using System.ComponentModel;
 using YAXLib;
 
 namespace GoodAI.Modules.NeuralNetwork.Layers
@@ -10,110 +10,75 @@ namespace GoodAI.Modules.NeuralNetwork.Layers
 
     /// <author>GoodAI</author>
     /// <meta>mz</meta>
-    /// <status>WIP</status>
+    /// <status>Working</status>
     /// <summary>Pooling layer.</summary>
-    /// <description></description>
+    /// <description>Layer that performs max pooling. It takes max value of each input window and presents it to the output.</description>
     public class MyPoolingLayer : MyAbstractLayer, IMyCustomTaskFactory
     {
 
         public MyMemoryBlock<float> ActivatedNeurons { get; protected set; }
 
-        #region Parameters
-
         public override ConnectionType Connection
         {
-            get { return ConnectionType.CONVOLUTION; }
+            get { return ConnectionType.ONE_TO_ONE; }
         }
 
         [YAXSerializableField(DefaultValue = 128)]
         [MyBrowsable, Category("\tLayer"), ReadOnly(true)]
         public override int Neurons { get; set; }
 
-//        [YAXSerializableField(DefaultValue = ActivationFunction.MAX)]
-//        [MyBrowsable, Category("Activation")]
-//        public ActivationFunction ActivationFunction { get; set; }
 
-
-
-        [YAXSerializableField(DefaultValue = 1)]
-        private int m_depth = 1;
-        [MyBrowsable, Category("Input image dimensions")]
-        public int Depth
-        {
-            get { return m_depth; }
-            set
-            {
-                if (value < 1)
-                    return;
-                m_depth = value;
-            }
-        }
-
-
-        [YAXSerializableField(DefaultValue = 2)]
-        private int m_inputWidth = 2;
-        [MyBrowsable, Category("Input image dimensions")]
+        #region Input
+        [MyBrowsable, Category("Input image dimensions"), DisplayName("\t\tWidth"), ReadOnly(true)]
         public int InputWidth
         {
-            get { return m_inputWidth; }
-            set
-            {
-                if (value < 1)
-                    return;
-                m_inputWidth = value;
-                OutputWidth = MyConvolutionLayer.SetOutputDimension(InputWidth, FilterWidth, HorizontalStride, 0);
-            }
+            get { return MyConvolutionLayer.GetInputDimension(Input, 0); }
+
         }
 
-        [YAXSerializableField(DefaultValue = 2)]
-        private int m_inputHeight = 2;
-        [MyBrowsable, Category("Input image dimensions")]
+
+        [MyBrowsable, Category("Input image dimensions"), DisplayName("\tHeight"), ReadOnly(true)]
         public int InputHeight
         {
-            get { return m_inputHeight; }
-            set
-            {
-                if (value < 1)
-                    return;
-                m_inputHeight = value;
-                OutputHeight = MyConvolutionLayer.SetOutputDimension(InputHeight, FilterHeight, VerticalStride, 0);
-            }
+            get { return MyConvolutionLayer.GetInputDimension(Input, 1); }
+
         }
 
 
-        [YAXSerializableField(DefaultValue = 0)]
-        private int m_outputWidth = 0;
-        [MyBrowsable, Category("Output image dimensions"), ReadOnly(true)]
+        [MyBrowsable, Category("Input image dimensions"), DisplayName("Depth"), ReadOnly(true)]
+        public int InputDepth
+        {
+            get { return MyConvolutionLayer.GetInputDimension(Input, 2); }
+
+        }
+        #endregion
+
+
+        #region Output
+        [MyBrowsable, Category("Output image dimensions"), DisplayName("\t\tWidth"), ReadOnly(true)]
         public int OutputWidth
         {
-            get { return m_outputWidth; }
-            set
-            {
-                if (value < 1)
-                    return;
-                m_outputWidth = value;
-            }
+            get { return MyConvolutionLayer.SetOutputDimension(InputWidth, FilterWidth, HorizontalStride); }
         }
 
-        [YAXSerializableField(DefaultValue = 0)]
-        private int m_outputHeight = 0;
-        [MyBrowsable, Category("Output image dimensions"), ReadOnly(true)]
+        [MyBrowsable, Category("Output image dimensions"), DisplayName("\tHeight"), ReadOnly(true)]
         public int OutputHeight
         {
-            get { return m_outputHeight; }
-            set
-            {
-                if (value < 1)
-                    return;
-                m_outputHeight = value;
-            }
+            get { return MyConvolutionLayer.SetOutputDimension(InputHeight, FilterHeight, VerticalStride); }
         }
 
+        [MyBrowsable, Category("Output image dimensions"), DisplayName("Depth"), ReadOnly(true)]
+        public int OutputDepth
+        {
+            get { return InputDepth; }
+        }
+        #endregion
 
 
+        #region Filter
         [YAXSerializableField(DefaultValue = 2)]
         private int m_width = 2;
-        [MyBrowsable, Category("Filter dimensions")]
+        [MyBrowsable, Category("Filter"), DisplayName("\t\t\tWidth")]
         public int FilterWidth
         {
             get { return m_width; }
@@ -122,14 +87,12 @@ namespace GoodAI.Modules.NeuralNetwork.Layers
                 if (value < 1)
                     return;
                 m_width = value;
-                OutputWidth = MyConvolutionLayer.SetOutputDimension(InputWidth, FilterWidth, HorizontalStride, 0);
             }
         }
 
-
         [YAXSerializableField(DefaultValue = 2)]
         private int m_height = 2;
-        [MyBrowsable, Category("Filter dimensions")]
+        [MyBrowsable, Category("Filter"), DisplayName("\t\tHeight")]
         public int FilterHeight
         {
             get { return m_height; }
@@ -138,13 +101,13 @@ namespace GoodAI.Modules.NeuralNetwork.Layers
                 if (value < 1)
                     return;
                 m_height = value;
-                OutputHeight = MyConvolutionLayer.SetOutputDimension(InputHeight, FilterHeight, VerticalStride, 0);
             }
         }
 
+
         [YAXSerializableField(DefaultValue = 2)]
         private int m_horizontalStride = 2;
-        [MyBrowsable, Category("Filter dimensions")]
+        [MyBrowsable, Category("Filter"), DisplayName("Horizontal stride")]
         public int HorizontalStride
         {
             get { return m_horizontalStride; }
@@ -153,13 +116,12 @@ namespace GoodAI.Modules.NeuralNetwork.Layers
                 if (value < 1)
                     return;
                 m_horizontalStride = value;
-                OutputWidth = MyConvolutionLayer.SetOutputDimension(InputWidth, FilterWidth, HorizontalStride, 0);
             }
         }
 
         [YAXSerializableField(DefaultValue = 2)]
         private int m_verticalStride = 2;
-        [MyBrowsable, Category("Filter dimensions")]
+        [MyBrowsable, Category("Filter"), DisplayName("Vertical stride")]
         public int VerticalStride
         {
             get { return m_verticalStride; }
@@ -168,21 +130,25 @@ namespace GoodAI.Modules.NeuralNetwork.Layers
                 if (value < 1)
                     return;
                 m_verticalStride = value;
-                OutputHeight = MyConvolutionLayer.SetOutputDimension(InputHeight, FilterHeight, VerticalStride, 0);
             }
         }
+
+
+
 
         #endregion
 
         //Memory blocks size rules
         public override void UpdateMemoryBlocks()
         {
-            Neurons = Depth*OutputWidth*OutputHeight;
-            OutputColumnHint = OutputWidth;
+            Neurons = OutputWidth*OutputHeight*OutputDepth;
             base.UpdateMemoryBlocks();
             if (Neurons > 0)
             {
+                Output.Dims = new TensorDimensions(OutputWidth, OutputHeight, OutputDepth);
                 ActivatedNeurons.Count = Neurons;
+                Delta.Dims = Output.Dims;
+                ActivatedNeurons.Dims = Output.Dims;
             }
         }
 
@@ -191,8 +157,8 @@ namespace GoodAI.Modules.NeuralNetwork.Layers
         {
             base.Validate(validator);
 
-            if (PreviousLayer != null)
-                validator.AssertError(InputWidth * InputHeight * Depth == PreviousLayer.Neurons, this, "'Input width * input height * depth' must be equal to output size of the previous layer.");
+            if (PreviousTopologicalLayer != null)
+                validator.AssertError(InputWidth * InputHeight * InputDepth == PreviousTopologicalLayer.Neurons, this, "'Input width * input height * depth' must be equal to output size of the previous layer.");
 
             validator.AssertError((InputWidth - FilterWidth) % HorizontalStride == 0, this, "Filter does not fit the input image horizontally when striding.");
             
@@ -214,19 +180,10 @@ namespace GoodAI.Modules.NeuralNetwork.Layers
             }
         }
 
-
         public void CreateTasks()
         {
             ForwardTask = new MyPoolingForwardTask();
             DeltaBackTask = new MyPoolingBackwardTask();
         }
     }
-
-
-//    public enum ActivationFunction
-//    {
-//        MAX
-//    }
-
-
 }

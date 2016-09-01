@@ -1,24 +1,19 @@
-﻿using GoodAI.Core.Nodes;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using GoodAI.Core.Utils;
+﻿using GoodAI.Core;
 using GoodAI.Core.Memory;
+using GoodAI.Core.Nodes;
+using GoodAI.Core.Signals;
 using GoodAI.Core.Task;
-using System.ComponentModel;
-using YAXLib;
-using System.Drawing;
+using GoodAI.Core.Utils;
 using ManagedCuda;
 using ManagedCuda.BasicTypes;
 using ManagedCuda.VectorTypes;
-
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
-using System.Collections;
-using GoodAI.Core.Signals;
-using GoodAI.Core;
+using YAXLib;
 
 namespace GoodAI.Modules.GridWorld
 {
@@ -61,7 +56,8 @@ namespace GoodAI.Modules.GridWorld
     /// 
     /// <h3>Inputs</h3>
     /// <ul>
-    ///     <li> <b>Action:</b> Vector indicating the selected action. The index of maximum value is evaluated as a selected action.</li>
+    ///     <li> <b>Action:</b> Vector indicating the selected action. The index of maximum value is evaluated as a selected action. 
+    ///     Actions are in the following order: NOOP,LEFT,RIGHT,UP,DOWN,PRESS.</li>
     /// </ul>
     /// 
     /// <h3>Parameters</h3>
@@ -170,7 +166,10 @@ namespace GoodAI.Modules.GridWorld
             mapF = 5,
             mapG = 6,
             mapH = 7,
-            mapI = 8
+            mapI = 8,
+            mapJ = 9,
+            mapK = 10,
+            mapL = 11
         };
 
         MyTextureSets ts;
@@ -179,7 +178,8 @@ namespace GoodAI.Modules.GridWorld
             textureA = 0,
             textureB = 1,
             textureC = 2,
-            textureD = 3
+            textureD = 3,
+            textureE = 4
         };
 
         [MyBrowsable, Category("Constants")]
@@ -253,6 +253,9 @@ namespace GoodAI.Modules.GridWorld
                 case MyTextureSets.textureD:
                     TEXTURE_SET = @"res\gridworld4\";
                     break;
+                case MyTextureSets.textureE:
+                    TEXTURE_SET = @"res\gridworld5\";
+                    break;
             }
 
             Bitmaps.Count += LoadAndGetBitmapSize(TEXTURE_SET + "taleEmpty.png");
@@ -300,6 +303,15 @@ namespace GoodAI.Modules.GridWorld
                     break;
                 case MyCustomMaps.mapI:
                     World = new MyMapI();
+                    break;
+                case MyCustomMaps.mapJ:
+                    World = new MyMapJ();
+                    break;
+                case MyCustomMaps.mapK:
+                    World = new MyMapK();
+                    break;
+                case MyCustomMaps.mapL:
+                    World = new MyMapL();
                     break;
                 default:
                     World = new MyMapA();
@@ -392,6 +404,7 @@ namespace GoodAI.Modules.GridWorld
         {
         }
 
+        public MyResetAgentTask ResetAgentTask { get; private set; }
         public MyInitTask InitGameTask { get; private set; }
         public MyUpdateTask UpdateTask { get; private set; }
         public MyRenderTask RenderGameTask { get; private set; }
@@ -839,6 +852,60 @@ namespace GoodAI.Modules.GridWorld
                 Owner.Engine.GetParams().ForceLightSwitches = ForceLightSwitches;
                 Owner.Engine.GetParams().ViewLimit = Owner.EgocentricViewLimit;
                 Owner.Engine.GetParams().LimitFieldOfView = LimitFieldOfView;
+            }
+        }
+
+        /// <summary>
+        /// Resets the agent position in the world to the specified [x,y] coordinates.
+        /// </summary>
+        [MyTaskInfo(DesignTime = true)]
+        public class MyResetAgentTask : MyTask<MyGridWorld>
+        {
+            private int m_positionX = 0;
+            [MyBrowsable, Category("Position")]
+            [YAXSerializableField(DefaultValue = 0)]
+            public int PositionX
+            {
+                get
+                {
+                    return m_positionX;
+                }
+                set
+                {
+                    if (Owner != null && Owner.World != null && value >= 0 && value < Owner.World.GetWidth())
+                    {
+                        m_positionX = value;
+                    }
+                }
+            }
+
+            private int m_positionY = 0;
+            [MyBrowsable, Category("Position")]
+            [YAXSerializableField(DefaultValue = 0)]
+            public int PositionY
+            {
+                get
+                {
+                    return m_positionY;
+                }
+                set
+                {
+                    if (Owner != null && Owner.World != null && value >= 0 && value < Owner.World.GetHeight())
+                    {
+                        m_positionY = value;
+                    }
+                }
+            }
+
+            public override void Init(int nGPU)
+            {
+
+            }
+
+            public override void Execute()
+            {
+                MyLog.INFO.WriteLine("Agent reset to position: [" + PositionX + "," + PositionY + "].");
+                Owner.World.GetAgent().setPosition(new int2(PositionX, PositionY));
             }
         }
     }

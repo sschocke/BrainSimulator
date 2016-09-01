@@ -2,13 +2,9 @@
 using GoodAI.Core.Utils;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using ManagedCuda.BasicTypes;
-using YAXLib;
 using System.ComponentModel;
 using System.Reflection;
+using YAXLib;
 
 
 namespace GoodAI.Core.Task
@@ -21,7 +17,7 @@ namespace GoodAI.Core.Task
         [YAXSerializableField(DefaultValue = false), YAXAttributeForClass]
         public bool Enabled 
         {
-            get { return m_enabled; }
+            get { return m_enabled && !Forbidden; }
             set 
             {
                 m_enabled = value;
@@ -38,6 +34,22 @@ namespace GoodAI.Core.Task
         {
             get { return GetInfo().OneShot; }
         }
+
+        public bool DesignTime
+        {
+            get { return GetInfo().DesignTime; }
+        }
+
+        public bool EnabledByDefault 
+        {
+            get { return !(GetInfo().Disabled); }
+        }
+
+        /// <summary>
+        /// The task will not run when this is true and it will also be made readonly in the UI.
+        /// Use this when a task cannot run based on other node settings (e.g. its run would break the behavior).
+        /// </summary>
+        public bool Forbidden { get; set; }
 
         private MyWorkingNode m_genericOwner;
 
@@ -80,8 +92,22 @@ namespace GoodAI.Core.Task
             }
         }
 
+        public TaskGroup TaskGroup {
+            get
+            {
+                if (!string.IsNullOrEmpty(TaskGroupName))
+                {
+                    TaskGroup taskGroup;
+                    GenericOwner.TaskGroups.TryGetValue(TaskGroupName, out taskGroup);
+                    return taskGroup;
+                }
+
+                return null;
+            }
+        }
+
         [YAXSerializableField, YAXAttributeForClass]
-        internal string PropertyName { get; set; }
+        public string PropertyName { get; internal set; }
 
         private static Dictionary<Type, MyTaskInfoAttribute> TASK_INFO = new Dictionary<Type, MyTaskInfoAttribute>();
 
@@ -121,6 +147,10 @@ namespace GoodAI.Core.Task
             }
         }
 
+        public override string ToString()
+        {
+            return Name;
+        }
     }
 
     public abstract class MyTask<OwnerType> : MyTask where OwnerType : MyWorkingNode
@@ -143,7 +173,6 @@ namespace GoodAI.Core.Task
         public MyTask()
         {
             Enabled = true;            
-        }       
-
+        }
     }    
 }

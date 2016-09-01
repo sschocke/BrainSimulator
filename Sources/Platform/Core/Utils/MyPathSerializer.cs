@@ -1,8 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Xml.Linq;
 using YAXLib;
 
@@ -91,7 +87,7 @@ namespace GoodAI.Core.Utils
 
                 if (!uri.IsAbsoluteUri)
                 {
-                    return ReferencePath + relativePath;
+                    return ReferencePath + Uri.UnescapeDataString(relativePath);
                 }
             }
 

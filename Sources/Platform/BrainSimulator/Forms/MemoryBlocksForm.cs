@@ -3,15 +3,9 @@ using GoodAI.Core.Memory;
 using GoodAI.Core.Nodes;
 using GoodAI.Core.Observers;
 using GoodAI.Core.Utils;
-using ManagedCuda.BasicTypes;
 using System;
 using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
 using System.Drawing;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using System.Windows.Forms;
 using WeifenLuo.WinFormsUI.Docking;
 
@@ -19,8 +13,10 @@ namespace GoodAI.BrainSimulator.Forms
 {
     public partial class MemoryBlocksForm : DockContent
     {
-        private MainForm m_mainForm;
+        private readonly MainForm m_mainForm;
         private MyNode m_target;
+        private bool m_escapeOrEnterPressed;
+        private bool m_errorInfoShown = true;
 
         public MemoryBlocksForm(MainForm mainForm)
         {
@@ -46,6 +42,7 @@ namespace GoodAI.BrainSimulator.Forms
         {            
             listView.Items.Clear();
             toolStrip.Enabled = false;
+            splitContainer.Panel2Collapsed = true;
 
             if (Target != null)
             {
@@ -70,7 +67,7 @@ namespace GoodAI.BrainSimulator.Forms
 
                     if (mb != null)
                     {
-                        if (Target is MyJoin)
+                        if (Target is IMyVariableBranchViewNodeBase)
                         {
                             addListViewItem(mb, "<Input_" + (i + 1) + ">", false);
                         }
@@ -125,14 +122,10 @@ namespace GoodAI.BrainSimulator.Forms
                 typeStr = block.GetType().GetGenericArguments()[0].Name;
             }
 
-            string size = block.Count.ToString();
+            if (block.IsDynamic)
+                name += " (dynamic)";
 
-            if (block.ColumnHint > 1 && block.ColumnHint < block.Count)
-            {
-                size = block.ColumnHint + "x" + (block.Count / block.ColumnHint) + " (" + block.Count.ToString() + ")";
-            }
-
-            ListViewItem item = new ListViewItem(new string[] { name, size, typeStr });
+            ListViewItem item = new ListViewItem(new string[] { name, PrintBlockSize(block), typeStr });
             item.Tag = block;
 
             if (owned)
@@ -153,6 +146,13 @@ namespace GoodAI.BrainSimulator.Forms
             listView.Items.Add(item);
         }
 
+        private static string PrintBlockSize(MyAbstractMemoryBlock block)
+        {
+            return (block != null)
+                ? block.Dims.Print(printTotalSize: true)
+                : "?";
+        }
+
         private void listView_SelectedIndexChanged(object sender, EventArgs e)
         {
             toolStrip.Enabled = listView.SelectedItems.Count > 0;
@@ -168,6 +168,11 @@ namespace GoodAI.BrainSimulator.Forms
             m_mainForm.CreateAndShowObserverView(listView.SelectedItems[0].Tag as MyAbstractMemoryBlock, Target, typeof(MyTimePlotObserver));
         }
 
+        private void addHostPlotButton_Click(object sender, EventArgs e)
+        {
+            m_mainForm.CreateAndShowObserverView(listView.SelectedItems[0].Tag as MyAbstractMemoryBlock, Target, typeof(TimePlotObserver));
+        }
+
         private void listView_MouseDoubleClick(object sender, MouseEventArgs e)
         {
             addObserverButton_Click(sender, e);
@@ -178,6 +183,11 @@ namespace GoodAI.BrainSimulator.Forms
             m_mainForm.CreateAndShowObserverView(listView.SelectedItems[0].Tag as MyAbstractMemoryBlock, Target, typeof(MyMatrixObserver));
         }
 
+        private void addHostMatrixObserver_Click(object sender, EventArgs e)
+        {
+            m_mainForm.CreateAndShowObserverView(listView.SelectedItems[0].Tag as MyAbstractMemoryBlock, Target, typeof(MatrixObserver));
+        }
+
         private void addSpikeObserver_Click(object sender, EventArgs e)
         {
             m_mainForm.CreateAndShowObserverView(listView.SelectedItems[0].Tag as MyAbstractMemoryBlock, Target, typeof(MySpikeRasterObserver));
@@ -186,6 +196,11 @@ namespace GoodAI.BrainSimulator.Forms
         private void addHistogramObserver_Click(object sender, EventArgs e)
         {
             m_mainForm.CreateAndShowObserverView(listView.SelectedItems[0].Tag as MyAbstractMemoryBlock, Target, typeof(MyHistogramObserver));
-        }     
+        }
+
+        private void addTextObserver_Click(object sender, EventArgs e)
+        {
+            m_mainForm.CreateAndShowObserverView(listView.SelectedItems[0].Tag as MyAbstractMemoryBlock, Target, typeof(MyTextObserver));
+        }
     }
 }

@@ -29,13 +29,17 @@
         private void InitializeComponent()
         {
             this.debugTreeView = new Aga.Controls.Tree.TreeViewAdv();
-            this.treeColumn2 = new Aga.Controls.Tree.TreeColumn();
-            this.treeColumn3 = new Aga.Controls.Tree.TreeColumn();
-            this.treeColumn1 = new Aga.Controls.Tree.TreeColumn();
-            this.nodeCheckBox1 = new Aga.Controls.Tree.NodeControls.NodeCheckBox();
-            this.nodeStateIcon1 = new Aga.Controls.Tree.NodeControls.NodeStateIcon();
+            this.taskName = new Aga.Controls.Tree.TreeColumn();
+            this.taskType = new Aga.Controls.Tree.TreeColumn();
+            this.enabled = new Aga.Controls.Tree.TreeColumn();
+            this.breakpoint = new Aga.Controls.Tree.TreeColumn();
+            this.profilerTime = new Aga.Controls.Tree.TreeColumn();
+            this.checkEnabled = new Aga.Controls.Tree.NodeControls.NodeCheckBox();
+            this.stateIcon = new Aga.Controls.Tree.NodeControls.NodeStateIcon();
             this.nodeTextBox1 = new Aga.Controls.Tree.NodeControls.NodeTextBox();
             this.nodeTextBox2 = new Aga.Controls.Tree.NodeControls.NodeTextBox();
+            this.breakpointCheckBox = new Aga.Controls.Tree.NodeControls.NodeCheckBox();
+            this.profilerTimeValue = new Aga.Controls.Tree.NodeControls.NodeTextBox();
             this.toolStrip = new System.Windows.Forms.ToolStrip();
             this.showSignalsButton = new System.Windows.Forms.ToolStripButton();
             this.showDisabledTasksButton = new System.Windows.Forms.ToolStripButton();
@@ -47,6 +51,9 @@
             this.stepOverButton = new System.Windows.Forms.ToolStripButton();
             this.stepOutButton = new System.Windows.Forms.ToolStripButton();
             this.toolStripSeparator1 = new System.Windows.Forms.ToolStripSeparator();
+            this.collapseAllButton = new System.Windows.Forms.ToolStripButton();
+            this.expandAllButton = new System.Windows.Forms.ToolStripButton();
+            this.toolStripSeparator3 = new System.Windows.Forms.ToolStripSeparator();
             this.noDebugLabel = new System.Windows.Forms.ToolStripLabel();
             this.toolStrip.SuspendLayout();
             this.SuspendLayout();
@@ -56,86 +63,123 @@
             this.debugTreeView.AllowColumnReorder = true;
             this.debugTreeView.BackColor = System.Drawing.SystemColors.Window;
             this.debugTreeView.BorderStyle = System.Windows.Forms.BorderStyle.FixedSingle;
-            this.debugTreeView.Columns.Add(this.treeColumn2);
-            this.debugTreeView.Columns.Add(this.treeColumn3);
-            this.debugTreeView.Columns.Add(this.treeColumn1);
+            this.debugTreeView.Columns.Add(this.taskName);
+            this.debugTreeView.Columns.Add(this.taskType);
+            this.debugTreeView.Columns.Add(this.enabled);
+            this.debugTreeView.Columns.Add(this.breakpoint);
+            this.debugTreeView.Columns.Add(this.profilerTime);
             this.debugTreeView.DefaultToolTipProvider = null;
             this.debugTreeView.Dock = System.Windows.Forms.DockStyle.Fill;
             this.debugTreeView.DragDropMarkColor = System.Drawing.Color.Black;
             this.debugTreeView.Font = new System.Drawing.Font("Segoe UI", 9F, System.Drawing.FontStyle.Regular, System.Drawing.GraphicsUnit.Point, ((byte)(0)));
             this.debugTreeView.FullRowSelect = true;
+            this.debugTreeView.FullRowSelectActiveColor = System.Drawing.Color.Empty;
+            this.debugTreeView.FullRowSelectInactiveColor = System.Drawing.Color.Empty;
             this.debugTreeView.GridLineStyle = Aga.Controls.Tree.GridLineStyle.Vertical;
             this.debugTreeView.Indent = 10;
             this.debugTreeView.LineColor = System.Drawing.Color.DarkGray;
             this.debugTreeView.Location = new System.Drawing.Point(3, 28);
             this.debugTreeView.Model = null;
             this.debugTreeView.Name = "debugTreeView";
-            this.debugTreeView.NodeControls.Add(this.nodeCheckBox1);
-            this.debugTreeView.NodeControls.Add(this.nodeStateIcon1);
+            this.debugTreeView.NodeControls.Add(this.checkEnabled);
+            this.debugTreeView.NodeControls.Add(this.stateIcon);
             this.debugTreeView.NodeControls.Add(this.nodeTextBox1);
             this.debugTreeView.NodeControls.Add(this.nodeTextBox2);
+            this.debugTreeView.NodeControls.Add(this.breakpointCheckBox);
+            this.debugTreeView.NodeControls.Add(this.profilerTimeValue);
+            this.debugTreeView.NodeFilter = null;
             this.debugTreeView.RowHeight = 19;
             this.debugTreeView.SelectedNode = null;
             this.debugTreeView.ShowNodeToolTips = true;
-            this.debugTreeView.Size = new System.Drawing.Size(623, 820);
+            this.debugTreeView.Size = new System.Drawing.Size(648, 820);
             this.debugTreeView.TabIndex = 2;
             this.debugTreeView.Text = "Scheduled Tasks";
             this.debugTreeView.UseColumns = true;
+            this.debugTreeView.SelectionChanged += new System.EventHandler(this.debugTreeView_SelectionChanged);
             // 
-            // treeColumn2
+            // taskName
             // 
-            this.treeColumn2.Header = "Task Name";
-            this.treeColumn2.SortOrder = System.Windows.Forms.SortOrder.None;
-            this.treeColumn2.TooltipText = null;
-            this.treeColumn2.Width = 250;
+            this.taskName.Header = "Task Name";
+            this.taskName.SortOrder = System.Windows.Forms.SortOrder.None;
+            this.taskName.TooltipText = null;
+            this.taskName.Width = 250;
             // 
-            // treeColumn3
+            // taskType
             // 
-            this.treeColumn3.Header = "Task Type";
-            this.treeColumn3.SortOrder = System.Windows.Forms.SortOrder.None;
-            this.treeColumn3.TooltipText = null;
-            this.treeColumn3.Width = 200;
+            this.taskType.Header = "Task Type";
+            this.taskType.SortOrder = System.Windows.Forms.SortOrder.None;
+            this.taskType.TooltipText = null;
+            this.taskType.Width = 200;
             // 
-            // treeColumn1
+            // enabled
             // 
-            this.treeColumn1.Header = "Enabled";
-            this.treeColumn1.SortOrder = System.Windows.Forms.SortOrder.None;
-            this.treeColumn1.TooltipText = null;
-            this.treeColumn1.Width = 60;
+            this.enabled.Header = "Enabled";
+            this.enabled.SortOrder = System.Windows.Forms.SortOrder.None;
+            this.enabled.TooltipText = null;
+            this.enabled.Width = 60;
             // 
-            // nodeCheckBox1
+            // breakpoint
             // 
-            this.nodeCheckBox1.DataPropertyName = "Checked";
-            this.nodeCheckBox1.LeftMargin = 20;
-            this.nodeCheckBox1.ParentColumn = this.treeColumn1;
-            this.nodeCheckBox1.IsVisibleValueNeeded += new System.EventHandler<Aga.Controls.Tree.NodeControls.NodeControlValueEventArgs>(this.nodeCheckBox1_IsVisibleValueNeeded);
+            this.breakpoint.Header = "Breakpoint";
+            this.breakpoint.SortOrder = System.Windows.Forms.SortOrder.None;
+            this.breakpoint.TooltipText = null;
+            this.breakpoint.Width = 25;
             // 
-            // nodeStateIcon1
+            // profilerTime
             // 
-            this.nodeStateIcon1.DataPropertyName = "Icon";
-            this.nodeStateIcon1.LeftMargin = 1;
-            this.nodeStateIcon1.ParentColumn = this.treeColumn2;
-            this.nodeStateIcon1.ScaleMode = Aga.Controls.Tree.ImageScaleMode.Clip;
+            this.profilerTime.Header = "Profiling Time";
+            this.profilerTime.SortOrder = System.Windows.Forms.SortOrder.None;
+            this.profilerTime.TooltipText = "";
+            this.profilerTime.Width = 70;
+            // 
+            // checkEnabled
+            // 
+            this.checkEnabled.DataPropertyName = "Checked";
+            this.checkEnabled.EditEnabled = true;
+            this.checkEnabled.LeftMargin = 20;
+            this.checkEnabled.ParentColumn = this.enabled;
+            this.checkEnabled.IsVisibleValueNeeded += new System.EventHandler<Aga.Controls.Tree.NodeControls.NodeControlValueEventArgs>(this.nodeCheckBox1_IsVisibleValueNeeded);
+            // 
+            // stateIcon
+            // 
+            this.stateIcon.DataPropertyName = "Icon";
+            this.stateIcon.LeftMargin = 1;
+            this.stateIcon.ParentColumn = this.taskName;
+            this.stateIcon.ScaleMode = Aga.Controls.Tree.ImageScaleMode.Clip;
             // 
             // nodeTextBox1
             // 
             this.nodeTextBox1.DataPropertyName = "Text";
             this.nodeTextBox1.IncrementalSearchEnabled = true;
             this.nodeTextBox1.LeftMargin = 3;
-            this.nodeTextBox1.ParentColumn = this.treeColumn2;
-            this.nodeTextBox1.DrawText += new System.EventHandler<Aga.Controls.Tree.NodeControls.DrawEventArgs>(this.nodeTextBox1_DrawText);
+            this.nodeTextBox1.ParentColumn = this.taskName;
+            this.nodeTextBox1.DrawText += new System.EventHandler<Aga.Controls.Tree.NodeControls.DrawTextEventArgs>(this.nodeTextBox1_DrawText);
             // 
             // nodeTextBox2
             // 
             this.nodeTextBox2.DataPropertyName = "OwnerName";
             this.nodeTextBox2.IncrementalSearchEnabled = true;
             this.nodeTextBox2.LeftMargin = 3;
-            this.nodeTextBox2.ParentColumn = this.treeColumn3;
-            this.nodeTextBox2.DrawText += new System.EventHandler<Aga.Controls.Tree.NodeControls.DrawEventArgs>(this.nodeTextBox1_DrawText);
+            this.nodeTextBox2.ParentColumn = this.taskType;
+            this.nodeTextBox2.DrawText += new System.EventHandler<Aga.Controls.Tree.NodeControls.DrawTextEventArgs>(this.nodeTextBox1_DrawText);
+            // 
+            // breakpointCheckBox
+            // 
+            this.breakpointCheckBox.DataPropertyName = "Breakpoint";
+            this.breakpointCheckBox.EditEnabled = true;
+            this.breakpointCheckBox.LeftMargin = 0;
+            this.breakpointCheckBox.ParentColumn = this.breakpoint;
+            // 
+            // profilerTimeValue
+            // 
+            this.profilerTimeValue.DataPropertyName = "ProfilerTimeFormatted";
+            this.profilerTimeValue.IncrementalSearchEnabled = true;
+            this.profilerTimeValue.LeftMargin = 3;
+            this.profilerTimeValue.ParentColumn = this.profilerTime;
+            this.profilerTimeValue.DrawText += new System.EventHandler<Aga.Controls.Tree.NodeControls.DrawTextEventArgs>(this.profilerTimeValue_DrawText);
             // 
             // toolStrip
             // 
-            this.toolStrip.Enabled = false;
             this.toolStrip.GripStyle = System.Windows.Forms.ToolStripGripStyle.Hidden;
             this.toolStrip.Items.AddRange(new System.Windows.Forms.ToolStripItem[] {
             this.showSignalsButton,
@@ -148,10 +192,13 @@
             this.stepOverButton,
             this.stepOutButton,
             this.toolStripSeparator1,
+            this.collapseAllButton,
+            this.expandAllButton,
+            this.toolStripSeparator3,
             this.noDebugLabel});
             this.toolStrip.Location = new System.Drawing.Point(3, 3);
             this.toolStrip.Name = "toolStrip";
-            this.toolStrip.Size = new System.Drawing.Size(623, 25);
+            this.toolStrip.Size = new System.Drawing.Size(648, 25);
             this.toolStrip.TabIndex = 3;
             this.toolStrip.Text = "toolStrip";
             // 
@@ -228,6 +275,7 @@
             // stepInButton
             // 
             this.stepInButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
+            this.stepInButton.Enabled = false;
             this.stepInButton.Image = global::GoodAI.BrainSimulator.Properties.Resources.StepIn;
             this.stepInButton.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
             this.stepInButton.ImageTransparentColor = System.Drawing.Color.Magenta;
@@ -250,6 +298,7 @@
             // stepOutButton
             // 
             this.stepOutButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
+            this.stepOutButton.Enabled = false;
             this.stepOutButton.Image = global::GoodAI.BrainSimulator.Properties.Resources.Stepout;
             this.stepOutButton.ImageScaling = System.Windows.Forms.ToolStripItemImageScaling.None;
             this.stepOutButton.ImageTransparentColor = System.Drawing.Color.Magenta;
@@ -263,6 +312,33 @@
             this.toolStripSeparator1.Name = "toolStripSeparator1";
             this.toolStripSeparator1.Size = new System.Drawing.Size(6, 25);
             // 
+            // collapseAllButton
+            // 
+            this.collapseAllButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
+            this.collapseAllButton.Image = global::GoodAI.BrainSimulator.Properties.Resources.collapse;
+            this.collapseAllButton.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this.collapseAllButton.Name = "collapseAllButton";
+            this.collapseAllButton.Size = new System.Drawing.Size(23, 22);
+            this.collapseAllButton.Text = "Collapse all";
+            this.collapseAllButton.ToolTipText = "Collapse all tree nodes";
+            this.collapseAllButton.Click += new System.EventHandler(this.collapseAllButton_Click);
+            // 
+            // expandAllButton
+            // 
+            this.expandAllButton.DisplayStyle = System.Windows.Forms.ToolStripItemDisplayStyle.Image;
+            this.expandAllButton.Image = global::GoodAI.BrainSimulator.Properties.Resources.expand;
+            this.expandAllButton.ImageTransparentColor = System.Drawing.Color.Magenta;
+            this.expandAllButton.Name = "expandAllButton";
+            this.expandAllButton.Size = new System.Drawing.Size(23, 22);
+            this.expandAllButton.Text = "Expand all";
+            this.expandAllButton.ToolTipText = "Expand all tree nodes";
+            this.expandAllButton.Click += new System.EventHandler(this.expandAllButton_Click);
+            // 
+            // toolStripSeparator3
+            // 
+            this.toolStripSeparator3.Name = "toolStripSeparator3";
+            this.toolStripSeparator3.Size = new System.Drawing.Size(6, 25);
+            // 
             // noDebugLabel
             // 
             this.noDebugLabel.Name = "noDebugLabel";
@@ -273,7 +349,7 @@
             // 
             this.AutoScaleDimensions = new System.Drawing.SizeF(6F, 13F);
             this.AutoScaleMode = System.Windows.Forms.AutoScaleMode.Font;
-            this.ClientSize = new System.Drawing.Size(629, 851);
+            this.ClientSize = new System.Drawing.Size(654, 851);
             this.Controls.Add(this.debugTreeView);
             this.Controls.Add(this.toolStrip);
             this.DockAreas = ((WeifenLuo.WinFormsUI.Docking.DockAreas)(((((WeifenLuo.WinFormsUI.Docking.DockAreas.Float | WeifenLuo.WinFormsUI.Docking.DockAreas.DockLeft) 
@@ -284,7 +360,7 @@
             this.HideOnClose = true;
             this.Name = "DebugForm";
             this.Padding = new System.Windows.Forms.Padding(3);
-            this.Text = "Debugging";
+            this.Text = "Debugging / Profiling";
             this.toolStrip.ResumeLayout(false);
             this.toolStrip.PerformLayout();
             this.ResumeLayout(false);
@@ -295,12 +371,12 @@
         #endregion
 
         private Aga.Controls.Tree.TreeViewAdv debugTreeView;
-        private Aga.Controls.Tree.NodeControls.NodeStateIcon nodeStateIcon1;
+        private Aga.Controls.Tree.NodeControls.NodeStateIcon stateIcon;
         private Aga.Controls.Tree.NodeControls.NodeTextBox nodeTextBox1;
-        public Aga.Controls.Tree.NodeControls.NodeCheckBox nodeCheckBox1;
-        private Aga.Controls.Tree.TreeColumn treeColumn2;
-        private Aga.Controls.Tree.TreeColumn treeColumn3;
-        private Aga.Controls.Tree.TreeColumn treeColumn1;
+        public Aga.Controls.Tree.NodeControls.NodeCheckBox checkEnabled;
+        private Aga.Controls.Tree.TreeColumn taskName;
+        private Aga.Controls.Tree.TreeColumn taskType;
+        private Aga.Controls.Tree.TreeColumn enabled;
         private Aga.Controls.Tree.NodeControls.NodeTextBox nodeTextBox2;
         private System.Windows.Forms.ToolStrip toolStrip;
         private System.Windows.Forms.ToolStripButton showDisabledTasksButton;
@@ -314,6 +390,13 @@
         public System.Windows.Forms.ToolStripButton pauseToolButton;
         public System.Windows.Forms.ToolStripButton stopToolButton;
         private System.Windows.Forms.ToolStripSeparator toolStripSeparator2;
+        private Aga.Controls.Tree.TreeColumn breakpoint;
+        private Aga.Controls.Tree.TreeColumn profilerTime;
+        private Aga.Controls.Tree.NodeControls.NodeTextBox profilerTimeValue;
+        public Aga.Controls.Tree.NodeControls.NodeCheckBox breakpointCheckBox;
+        private System.Windows.Forms.ToolStripButton collapseAllButton;
+        private System.Windows.Forms.ToolStripButton expandAllButton;
+        private System.Windows.Forms.ToolStripSeparator toolStripSeparator3;
 
     }
 }

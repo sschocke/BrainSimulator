@@ -1,20 +1,19 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-using GoodAI.Core;
+﻿using GoodAI.Core;
 using GoodAI.Core.Nodes;
-using GoodAI.Core.Memory;
-using GoodAI.Core.Utils;
 using GoodAI.Core.Task;
-using System.Collections;
-using System.ComponentModel;
-
-using YAXLib;
+using GoodAI.Core.Utils;
 using ManagedCuda;
+using ManagedCuda.BasicTypes;
+using ManagedCuda.CudaBlas;
+using GoodAI.Modules.Matrix;
 using GoodAI.Modules.NeuralNetwork.Layers;
+using System;
+using System.ComponentModel;
+using System.Collections;
+using System.Linq;
+using YAXLib;
+using System.Reflection;
+using System.Collections.Generic;
 
 namespace GoodAI.Modules.NeuralNetwork.Group
 {
@@ -26,15 +25,18 @@ namespace GoodAI.Modules.NeuralNetwork.Group
     [Description("InitGroup"), MyTaskInfo(OneShot = true)]
     public class MyInitNNGroupTask : MyTask<MyNeuralNetworkGroup>
     {
-        //parameterless constructor
+        // parameterless constructor
         public MyInitNNGroupTask() { }
 
-        //Kernel initialization
+        // Kernel initialization
         public override void Init(int nGPU) { }
 
-        //Task execution
+        // Task execution
         public override void Execute()
         {
+            // timeStep is -1, because it is incremented at beginning of new timestep
+            Owner.TimeStep = -1;
+
             // disable GradientCheck by default - TODO: fix this somehow
             Owner.GradientCheck.Enabled = false;
 
@@ -43,42 +45,134 @@ namespace GoodAI.Modules.NeuralNetwork.Group
 
             // set next and previous layer
             MyAbstractLayer layer;
-            MyAbstractLayer lastLayer = null;
+            MyAbstractLayer lastTopologicalLayer = null;
             foreach (MyNode child in Owner.SortedChildren)
             {
                 if (child is MyAbstractLayer)
                 {
                     layer = child as MyAbstractLayer;
 
-                    if (lastLayer != null)
+                    if (lastTopologicalLayer != null)
                     {
-                        lastLayer.NextLayer = layer;
+                        lastTopologicalLayer.NextTopologicalLayer = layer;
                     }
 
-                    layer.NextLayer = null;
-                    layer.PreviousLayer = lastLayer;
-                    lastLayer = layer;
+                    layer.NextTopologicalLayer = null;
+                    layer.PreviousTopologicalLayer = lastTopologicalLayer;
+                    lastTopologicalLayer = layer;
+
+                    // collect all next and all previous conneted layers
+                    layer.PreviousConnectedLayers = new List<MyAbstractLayer>();
+                    layer.NextConnectedLayers = new List<MyAbstractLayer>();
+                    foreach (MyConnection inputConnection in child.InputConnections)
+                    {
+                        if (inputConnection != null && inputConnection.From is MyAbstractLayer)
+                        {
+                            MyAbstractLayer lastConnectedLayer = inputConnection.From as MyAbstractLayer;
+                            layer.PreviousConnectedLayers.Add(lastConnectedLayer);
+                            lastConnectedLayer.NextConnectedLayers.Add(layer);
+                        }
+                    }
                 }
             }
 
             // set first and last layer
-            layer = lastLayer;
-            Owner.FirstLayer = layer;
-            Owner.LastLayer = layer;
+            layer = lastTopologicalLayer;
+            Owner.FirstTopologicalLayer = layer;
+            Owner.LastTopologicalLayer = layer;
             while (layer != null)
             {
-                Owner.FirstLayer = layer;
-                layer = layer.PreviousLayer;
+                Owner.FirstTopologicalLayer = layer;
+                layer = layer.PreviousTopologicalLayer;
             }
 
             // count total number of weights
             Owner.TotalWeights = 0;
-            layer = Owner.FirstLayer;
+            layer = Owner.FirstTopologicalLayer;
             while (layer != null)
             {
                 if (layer is MyAbstractWeightLayer)
                     Owner.TotalWeights += (layer as MyAbstractWeightLayer).Weights.Count;
-                layer = layer.NextLayer;
+                layer = layer.NextTopologicalLayer;
+            }
+        }
+    }
+
+    /// <author>GoodAI</author>
+    /// <meta>mb</meta>
+    /// <status>Working</status>
+    /// <summary>
+    /// Used only if sequence length (neural group parameter) > 1.
+    /// Increments time step when iterating forth through time.
+    /// Used automatically, keep it checked.
+    /// </summary>
+    /// <description></description>
+    [Description("IncrementTimeStep"), MyTaskInfo(OneShot = false)]
+    public class MyIncrementTimeStepTask : MyTask<MyNeuralNetworkGroup>
+    {
+        public MyIncrementTimeStepTask() { }
+
+        public override void Init(int nGPU) { }
+
+        public override void Execute()
+        {
+            Owner.TimeStep++;
+        }
+    }
+
+    /// <author>GoodAI</author>
+    /// <meta>mb</meta>
+    /// <status>Working</status>
+    /// <summary>
+    /// Used only if sequence length (neural group parameter) > 1.
+    /// Decrements time step when iterating back through time.
+    /// Used automatically, keep it checked.
+    /// </summary>
+    /// <description></description>
+    [Description("DecrementTimeStep"), MyTaskInfo(OneShot = false)]
+    public class MyDecrementTimeStepTask : MyTask<MyNeuralNetworkGroup>
+    {
+        public MyDecrementTimeStepTask() { }
+
+        public override void Init(int nGPU) { }
+
+        public override void Execute()
+        {
+            Owner.TimeStep--;
+        }
+    }
+
+    /// <author>GoodAI</author>
+    /// <meta>mb</meta>
+    /// <status>Working</status>
+    /// <summary>
+    /// Used only if sequence length (neural group parameter) > 1. When time step reaches the end of sequence,
+    /// then temporal memory blocks run a mode (method), e.g. sum memory snapshots through time. Default mode is none.
+    /// New modes can be defined in temporal memory blocks source. Used automatically, let it checked.
+    /// </summary>
+    /// <description></description>
+    [Description("RunTemporalBlocksMode"), MyTaskInfo(OneShot = false)]
+    public class MyRunTemporalBlocksModeTask : MyTask<MyNeuralNetworkGroup>
+    {
+        public override void Init(int nGPU)
+        {
+        }
+
+        public override void Execute()
+        {
+            foreach (MyNode child in Owner.SortedChildren)
+            {
+                if (child is MyAbstractLayer)
+                {
+                    foreach (PropertyInfo memBlockInfo in MyNodeInfo.Get(child.GetType()).OwnedMemoryBlocks)
+                    {
+                        Object memBlock = memBlockInfo.GetValue(child);
+                        if (memBlock is MyTemporalMemoryBlock<float>)
+                        {
+                            (memBlock as MyTemporalMemoryBlock<float>).RunMode();
+                        }
+                    }
+                }
             }
         }
     }
@@ -94,6 +188,31 @@ namespace GoodAI.Modules.NeuralNetwork.Group
         {
             MyLog.ERROR.WriteLine("No method provided to backpropagate MyAbstractWeightLayer " + layer + " in " + Owner);
         }
+
+        public void ComputeWeightGradientSum(MyAbstractWeightLayer layer)
+        {
+            if (Owner.BatchSize == 1) // cuBLAS tends to be slower when BatchSize is 1, gradient is computed in update weights kernels
+                return;
+
+            // WeightGradient = Delta x Transpose(Input)
+            MyCublasFactory.Instance.Gemm(Operation.NonTranspose, Operation.Transpose,
+                layer.Neurons, layer.Input.Count / Owner.BatchSize, Owner.BatchSize, 1.0f,
+                layer.Delta.GetDevice(layer), layer.Neurons,
+                layer.Input.GetDevice(layer), layer.Input.Count / Owner.BatchSize,
+                0.0f, layer.WeightGradient.GetDevice(layer), layer.Neurons
+                );
+            
+            // BiasGradient = Delta x Transpose(BiasInput). BiasInput is vector of ones
+            MyCublasFactory.Instance.Gemm(Operation.NonTranspose, Operation.Transpose,
+                layer.Neurons, 1, Owner.BatchSize, 1.0f,
+                layer.Delta.GetDevice(layer), layer.Neurons,
+                layer.BiasInput.GetDevice(layer), 1,
+                0.0f, layer.BiasGradient.GetDevice(layer), layer.Neurons
+                );
+        }
+
+        [YAXSerializableField(DefaultValue = false), MyBrowsable, Description("Disables and overrides layers' UpdateWeights checking if and only if set to TRUE. No effect when set to FALSE.")]
+        public bool DisableLearning { get; set; }
     }
 
     /// <author>GoodAI</author>
@@ -118,24 +237,58 @@ namespace GoodAI.Modules.NeuralNetwork.Group
         public MySGDTask() { }
 
         // kernel
-        private MyCudaKernel m_SGDupdateKernel;
+        private MyCudaKernel m_SGDupdateKernel, m_convSGDupdateKernel, m_partialSGDupdateKernel;
         public override void Init(int nGPU)
         {
             m_SGDupdateKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Layer\UpdateWeightsKernels", "FullyConnectedSGDUpdateKernel");
+            m_convSGDupdateKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Convolution\ConvolutionKernel", "ConvolutionSGDUpdateWeightsKernel");
+            m_partialSGDupdateKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Layer\UpdateWeightsKernels", "PartialSGDUpdateKernel");
         }
 
         //Task execution - should be called with a parameter
         public override void Execute()
         {
-            MyLog.ERROR.WriteLine("Please Execute MySGDTask with a layer parameter in " + Owner);
+            //MyLog.ERROR.WriteLine("Please Execute MySGDTask with a layer parameter in " + Owner);
         }
 
         public override void Execute(MyAbstractWeightLayer layer)
         {
             if (layer.Connection == ConnectionType.FULLY_CONNECTED)
             {
-                m_SGDupdateKernel.SetupExecution(layer.Neurons);
+                ComputeWeightGradientSum(layer);
+                
+                m_SGDupdateKernel.SetupExecution(layer.Weights.Count);
                 m_SGDupdateKernel.Run(
+                    layer.Input,
+                    layer.Delta,
+                    layer.WeightGradient,
+                    layer.BiasGradient,
+                    layer.Weights,
+                    layer.PreviousWeightDelta,
+                    layer.Bias,
+                    layer.PreviousBiasDelta,
+                    Owner.SGD.TrainingRate,
+                    Owner.SGD.Momentum,
+                    Owner.L1,
+                    Owner.L2,
+                    layer.DropoutMask,
+                    layer.Neurons,
+                    Owner.BatchSize,
+                    layer.Weights.Count
+                    );
+
+            }
+            else if (layer.Connection == ConnectionType.GAUSSIAN)
+            {
+                // Gaussian hidden layer just propagates delta, no weight updates
+            }
+            else if (layer.Connection == ConnectionType.PARTIAL_UPDATE && layer is IPartialUpdateLayer)
+            {
+                // Update some but not all of the weights
+                IPartialUpdateLayer partialUpdateLayer = layer as IPartialUpdateLayer;
+
+                m_partialSGDupdateKernel.SetupExecution(layer.Weights.Count);
+                m_partialSGDupdateKernel.Run(
                     layer.Input,
                     layer.Delta,
                     layer.Weights,
@@ -147,13 +300,40 @@ namespace GoodAI.Modules.NeuralNetwork.Group
                     Owner.L1,
                     Owner.L2,
                     layer.DropoutMask,
-                    layer.Input.Count,
-                    layer.Neurons
+                    layer.Neurons,
+                    layer.Weights.Count,
+                    partialUpdateLayer.SuppressUpdatesAt(),
+                    partialUpdateLayer.SuppressUpdatesCount()
+                );
+            }
+            else if (layer.Connection == ConnectionType.CONVOLUTION && layer is MyConvolutionLayer)
+            {
+                MyConvolutionLayer convLayer = (MyConvolutionLayer) layer;
+                m_convSGDupdateKernel.SetupExecution(convLayer.Weights.Count);
+                m_convSGDupdateKernel.Run(
+                    Owner.SGD.TrainingRate, Owner.SGD.Momentum,
+                    convLayer.Weights,
+                    convLayer.Bias, convLayer.PreviousBiasDelta,
+                    convLayer.Delta, convLayer.PreviousWeightDelta,
+                    convLayer.PaddedImage,
+                    convLayer.InputWidth + convLayer.ZeroPadding + convLayer.ZeroPadding,
+                    (convLayer.InputWidth + convLayer.ZeroPadding + convLayer.ZeroPadding)*
+                    (convLayer.InputHeight + convLayer.ZeroPadding + convLayer.ZeroPadding),
+                    convLayer.FilterWidth,
+                    convLayer.FilterWidth*convLayer.FilterHeight,
+                    convLayer.FilterWidth*convLayer.FilterHeight*convLayer.InputDepth,
+                    convLayer.OutputWidth, convLayer.OutputHeight, convLayer.OutputWidth*convLayer.OutputHeight,
+                    convLayer.HorizontalStride, convLayer.VerticalStride,
+                    convLayer.L1Term, convLayer.L2Term,
+                    Owner.BatchSize,
+                    convLayer.Weights.Count
+                    // should be equal to FilterWidth * FilterHeight * FilterCount * InputDepth
                     );
             }
             else
             {
-                MyLog.ERROR.WriteLine("No method provided to SGD propagate a " + layer.Connection + " connected MyAbstractWeightLayer in " + Owner);
+                MyLog.ERROR.WriteLine("No method provided to SGD propagate a " + layer.Connection +
+                                        " connected MyAbstractWeightLayer in " + Owner);
             }
         }
     }
@@ -185,26 +365,31 @@ namespace GoodAI.Modules.NeuralNetwork.Group
         public MyRMSTask() { }
 
         //Kernel initialization
-        private MyCudaKernel m_RMSPropUpdateKernel;
+        private MyCudaKernel m_RMSPropUpdateKernel, m_convRMSPropUpdateKernel;
         public override void Init(int nGPU)
         {
             m_RMSPropUpdateKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Layer\UpdateWeightsKernels", "FullyConnectedRMSPropUpdateKernel");
+            m_convRMSPropUpdateKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Convolution\ConvolutionKernel", "ConvolutionRMSPropUpdateWeightsKernel");
         }
 
         //Task execution
         public override void Execute()
         {
-            MyLog.ERROR.WriteLine("Please Execute MyRMSTask with a layer parameter in " + Owner);
+            //MyLog.ERROR.WriteLine("Please Execute MyRMSTask with a layer parameter in " + Owner);
         }
 
         public override void Execute(MyAbstractWeightLayer layer)
         {
             if (layer.Connection == ConnectionType.FULLY_CONNECTED)
             {
-                m_RMSPropUpdateKernel.SetupExecution(layer.Neurons);
+                ComputeWeightGradientSum(layer);
+
+                m_RMSPropUpdateKernel.SetupExecution(layer.Weights.Count);
                 m_RMSPropUpdateKernel.Run(
                     layer.Input,
                     layer.Delta,
+                    layer.WeightGradient,
+                    layer.BiasGradient,
                     layer.Weights,
                     layer.PreviousWeightDelta,
                     layer.Bias,
@@ -214,265 +399,146 @@ namespace GoodAI.Modules.NeuralNetwork.Group
                     Owner.L1,
                     Owner.L2,
                     layer.DropoutMask,
-                    layer.Input.Count,
                     layer.Neurons,
+                    Owner.BatchSize,
+                    layer.Weights.Count,
                     layer.MeanSquareWeight,
                     layer.MeanSquareBias,
                     Owner.RMS.SmoothingFactor
                     );
             }
+            else if (layer.Connection == ConnectionType.GAUSSIAN)
+            {
+                // Gaussian hidden layer just propagates delta, no weight updates
+            }
+            else if (layer.Connection == ConnectionType.CONVOLUTION && layer is MyConvolutionLayer)
+            {
+                MyConvolutionLayer convLayer = (MyConvolutionLayer)layer;
+                m_convRMSPropUpdateKernel.SetupExecution(convLayer.Weights.Count);
+                m_convRMSPropUpdateKernel.Run(
+                    Owner.RMS.TrainingRate, Owner.RMS.Momentum,
+                    convLayer.Weights,
+                    convLayer.Bias, convLayer.PreviousBiasDelta,
+                    convLayer.Delta, convLayer.PreviousWeightDelta,
+                    convLayer.PaddedImage,
+                    convLayer.InputWidth + convLayer.ZeroPadding + convLayer.ZeroPadding,
+                    (convLayer.InputWidth + convLayer.ZeroPadding + convLayer.ZeroPadding) *
+                    (convLayer.InputHeight + convLayer.ZeroPadding + convLayer.ZeroPadding),
+                    convLayer.FilterWidth,
+                    convLayer.FilterWidth * convLayer.FilterHeight,
+                    convLayer.FilterWidth * convLayer.FilterHeight * convLayer.InputDepth,
+                    convLayer.OutputWidth, convLayer.OutputHeight, convLayer.OutputWidth * convLayer.OutputHeight,
+                    convLayer.HorizontalStride, convLayer.VerticalStride,
+                    convLayer.L1Term, convLayer.L2Term,
+                    convLayer.MeanSquareWeight, convLayer.MeanSquareBias, Owner.RMS.SmoothingFactor,
+                    Owner.BatchSize,
+                    convLayer.Weights.Count
+                    // should be equal to FilterWidth * FilterHeight * FilterCount * InputDepth
+                    );
+            }
             else
             {
-                MyLog.ERROR.WriteLine("No method provided to RMS propagate a " + layer.Connection + " connected MyAbstractWeightLayer in " + Owner);
+                MyLog.ERROR.WriteLine("No method provided to RMS propagate a " + layer.Connection +
+                                      " connected MyAbstractWeightLayer in " + Owner);
             }
         }
     }
 
-    //[Description("vSGD-fd"), MyTaskInfo(OneShot = false)]
-    //public class MyvSGDfdTask : MyAbstractBackpropTask
-    //{
-    //    //parameterless constructor
-    //    public MyvSGDfdTask() { }
+    /// <author>GoodAI</author>
+    /// <meta>mz</meta>
+    /// <status>Working</status>
+    /// <summary>
+    ///     Adadelta is an adaptive learning method that changes each weight (parameter) separately and automatically over time.<br></br>
+    ///     No manual settings are needed and it is recommended to use the default values which should behave well in all cases.
+    /// </summary>
+    [Description("Adadelta"), MyTaskInfo(OneShot = false)]
+    public class MyAdadeltaTask : MyAbstractBackpropTask
+    {
+        // properties
+        [YAXSerializableField(DefaultValue = 0.000001f)]
+        [MyBrowsable, Category("\tHyperParameters")]
+        public float Epsilon { get; set; }
 
-    //    //Kernel initialization
-    //    private MyCudaKernel m_ComputeGradientsKernel;
-    //    private MyCudaKernel m_ShiftParametersKernel;
-    //    private MyCudaKernel m_FDCurvatureKernel;
-    //    private MyCudaKernel m_AdjustMemoryKernel;
-    //    private MyCudaKernel m_UpdateMovingAveragesKernel;
-    //    private MyCudaKernel m_EstimateLearningRateKernel;
-    //    private MyCudaKernel m_UpdateMemoryKernel;
-    //    private MyCudaKernel m_UpdateParametersKernel;
-    //    public override void Init(int nGPU)
-    //    {
-    //        m_ComputeGradientsKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\vSGD\GradientsKernels", "FullyConnectedGradientsKernel");
-    //        m_ShiftParametersKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\vSGD\ShiftKernels", "FullyConnectedShiftKernel");
-    //        m_FDCurvatureKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\vSGD\FDCurvatureKernels", "FullyConnectedCurvatureKernel");
-    //        m_AdjustMemoryKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\vSGD\AdjustMemoryKernels", "FullyConnectedAdjustMemoryKernel");
-    //        m_UpdateMovingAveragesKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\vSGD\UpdateMovingAveragesKernels", "FullyConnectedUpdateMovingAveragesKernel");
-    //        m_EstimateLearningRateKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\vSGD\EstimateLearningRateKernels", "FullyConnectedEstimateLearningRateKernel");
-    //        m_UpdateMemoryKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\vSGD\AdjustMemoryKernels", "FullyConnectedUpdateMemoryKernel");
-    //        m_UpdateParametersKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\vSGD\UpdateParametersKernels", "FullyConnectedUpdateParametersKernel");
-    //    }
+        [YAXSerializableField(DefaultValue = 0.95f)]
+        [MyBrowsable, Category("\tHyperParameters")]
+        public float Ro { get; set; }
 
-    //    //Task execution
-    //    public override void Execute()
-    //    {
-    //        MyLog.ERROR.WriteLine("Please Execute MyvSGDfdTask with a layer parameter in " + Owner);
-    //    }
+        //Kernel initialization
+        private MyCudaKernel m_adadeltaUpdateKernel, m_convAdadeltaUpdateKernel;
+        public override void Init(int nGPU)
+        {
+            m_adadeltaUpdateKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Layer\UpdateWeightsKernels", "FullyConnectedAdadeltaUpdateKernel");
+            m_convAdadeltaUpdateKernel = MyKernelFactory.Instance.Kernel(nGPU, @"NeuralNetwork\Convolution\ConvolutionKernel", "ConvolutionAdadeltaUpdateWeightsKernel");
+        }
 
-    //    public override void Execute(MyAbstractWeightLayer layer)
-    //    {
-    //        if (layer.Connection == ConnectionType.FULLY_CONNECTED)
-    //        {
-    //            // compute gradients
-    //            GetGradients(layer);
+        //Task execution
+        public override void Execute()
+        {
+            //MyLog.ERROR.WriteLine("Please Execute Adadelta with a layer parameter in " + Owner);
+        }
 
-    //            // save gradients
-    //            layer.OriginalWeightsGrad.CopyFromMemoryBlock(layer.WeightsGrad, 0, 0, layer.Weights.Count);
-    //            layer.OriginalBiasGrad.CopyFromMemoryBlock(layer.BiasGrad, 0, 0, layer.Bias.Count);
+        public override void Execute(MyAbstractWeightLayer layer)
+        {
+            if (layer.Connection == ConnectionType.FULLY_CONNECTED)
+            {
+                ComputeWeightGradientSum(layer);
 
-    //            // save parameters
-    //            layer.OriginalWeights.CopyFromMemoryBlock(layer.Weights, 0, 0, layer.Weights.Count);
-    //            layer.OriginalBias.CopyFromMemoryBlock(layer.Bias, 0, 0, layer.Bias.Count);
+                m_adadeltaUpdateKernel.SetupExecution(layer.Weights.Count);
+                m_adadeltaUpdateKernel.Run(
+                    layer.Input,
+                    layer.Delta,
+                    layer.WeightGradient,
+                    layer.BiasGradient,
+                    layer.Weights,
+                    layer.Bias,
+                    Owner.L1,
+                    Owner.L2,
+                    layer.DropoutMask,
+                    layer.Neurons,
+                    Owner.BatchSize,
+                    layer.Weights.Count,
+                    layer.MeanSquareWeight, layer.PreviousWeightDelta, layer.MeanSquareBias, layer.PreviousBiasDelta,
+                    Owner.Adadelta.Ro, Owner.Adadelta.Epsilon
+                    );
+            }
+            else if (layer.Connection == ConnectionType.GAUSSIAN)
+            {
+                // Gaussian hidden layer just propagates delta, no weight updates
+            }
+            else if (layer.Connection == ConnectionType.CONVOLUTION && layer is MyConvolutionLayer)
+            {
+                MyConvolutionLayer convLayer = (MyConvolutionLayer)layer;
+                m_convAdadeltaUpdateKernel.SetupExecution(convLayer.Weights.Count);
+                m_convAdadeltaUpdateKernel.Run(
+                    convLayer.Weights,
+                    convLayer.Bias,
+                    convLayer.Delta,
+                    convLayer.PaddedImage,
+                    convLayer.InputWidth + convLayer.ZeroPadding + convLayer.ZeroPadding,
+                    (convLayer.InputWidth + convLayer.ZeroPadding + convLayer.ZeroPadding) *
+                    (convLayer.InputHeight + convLayer.ZeroPadding + convLayer.ZeroPadding),
+                    convLayer.FilterWidth,
+                    convLayer.FilterWidth * convLayer.FilterHeight,
+                    convLayer.FilterWidth * convLayer.FilterHeight * convLayer.InputDepth,
+                    convLayer.OutputWidth, convLayer.OutputHeight, convLayer.OutputWidth * convLayer.OutputHeight,
+                    convLayer.HorizontalStride, convLayer.VerticalStride,
+                    convLayer.L1Term, convLayer.L2Term,
+                    convLayer.MeanSquareWeight, convLayer.PreviousWeightDelta, convLayer.MeanSquareBias,
+                    convLayer.PreviousBiasDelta,
+                    Owner.Adadelta.Ro, Owner.Adadelta.Epsilon,
+                    Owner.BatchSize,
+                    convLayer.Weights.Count
+                    // should be equal to FilterWidth * FilterHeight * FilterCount * InputDepth
+                    );
+            }
+            else
+            {
+                MyLog.ERROR.WriteLine("No method provided to Adadelta propagate a " + layer.Connection +
+                                      " connected MyAbstractWeightLayer in " + Owner);
+            }
+        }
+    }
 
-    //            // save deltas
-    //            layer.OriginalDelta.CopyFromMemoryBlock(layer.Delta, 0, 0, layer.Delta.Count);
-
-    //            // shift parameters
-    //            m_ShiftParametersKernel.SetupExecution(layer.Neurons);
-    //            m_ShiftParametersKernel.Run(
-    //                layer.Weights, // these are the shifted weights
-    //                layer.Bias, // these are the shifted biases
-    //                layer.OriginalWeights, // these are original weights
-    //                layer.OriginalBias, // these are original biases
-    //                layer.AvgWeightGrad,
-    //                layer.AvgBiasGrad,
-    //                layer.DropoutMask,
-    //                layer.Input.Count,
-    //                layer.Neurons
-    //                );
-
-    //            // let the first layer do the next forward and backward pass
-    //            if (layer.Id == Owner.FirstLayer.Id)
-    //            {
-    //                // shifted forward pass                    
-    //                Owner.FeedForward();
-
-    //                // finite differente curvature
-    //                vSGD_fdAlgorithm();                    
-    //            }
-    //        }
-    //        else
-    //        {
-    //            MyLog.ERROR.WriteLine("No method provided to vSGD-fd propagate a " + layer.Connection + " connected MyAbstractWeightLayer in " + Owner);
-    //        }
-    //    }
-
-    //    // vSGD_fdAlgorithm() is the main implementation of the vSGD-fd algorithm:
-    //    // finds deltas
-    //    // finds gradients for weights and biases
-    //    // computes finite difference curvature
-    //    // adjusts memory size for outliers
-    //    // update moving averages
-    //    private void vSGD_fdAlgorithm()
-    //    {
-    //        // this sets the output layer delta
-    //        Owner.GetError();
-
-    //        MyAbstractLayer layer = Owner.LastLayer;
-    //        while (layer != null)
-    //        {
-    //            // send deltas to previous layer
-    //            layer.DeltaBackTask.Execute();
-    //            if (layer is MyAbstractWeightLayer)
-    //            {
-    //                MyAbstractWeightLayer weightLayer = layer as MyAbstractWeightLayer;
-
-    //                // get gradients for this layer
-    //                GetGradients(weightLayer);
-
-    //                // get finite difference curvature for this layer
-    //                m_FDCurvatureKernel.SetupExecution(weightLayer.Neurons);
-    //                m_FDCurvatureKernel.Run(
-    //                    weightLayer.OriginalWeightsGrad, // these are original weights gradients
-    //                    weightLayer.OriginalBiasGrad, // these are original bias gradients
-    //                    weightLayer.WeightsGrad, // these are shifted weight gradients
-    //                    weightLayer.BiasGrad, // these are shifted bias gradients
-    //                    weightLayer.AvgWeightGrad,
-    //                    weightLayer.AvgBiasGrad,
-    //                    weightLayer.WeightGradCurve,
-    //                    weightLayer.BiasGradCurve,
-    //                    weightLayer.DropoutMask,
-    //                    weightLayer.Input.Count,
-    //                    weightLayer.Neurons
-    //                    );
-
-    //                // adjust memory size for outliers
-    //                m_AdjustMemoryKernel.SetupExecution(weightLayer.Neurons);
-    //                m_AdjustMemoryKernel.Run(
-    //                    weightLayer.OriginalWeightsGrad, // these are original weights gradients
-    //                    weightLayer.OriginalBiasGrad, // these are original bias gradients
-    //                    weightLayer.WeightGradCurve,
-    //                    weightLayer.BiasGradCurve,
-    //                    weightLayer.AvgWeightGrad,
-    //                    weightLayer.AvgBiasGrad,
-    //                    weightLayer.AvgWeightGradVar,
-    //                    weightLayer.AvgBiasGradVar,
-    //                    weightLayer.AvgWeightGradCurve,
-    //                    weightLayer.AvgBiasGradCurve,
-    //                    weightLayer.AvgWeightGradCurveVar,
-    //                    weightLayer.AvgBiasGradCurveVar,
-    //                    weightLayer.WeightMemorySize,
-    //                    weightLayer.BiasMemorySize,
-    //                    weightLayer.DropoutMask,
-    //                    weightLayer.Input.Count,
-    //                    weightLayer.Neurons
-    //                    );
-
-    //                // update moving averages
-    //                m_UpdateMovingAveragesKernel.SetupExecution(weightLayer.Neurons);
-    //                m_UpdateMovingAveragesKernel.Run(
-    //                    weightLayer.OriginalWeightsGrad, // these are original weights gradients
-    //                    weightLayer.OriginalBiasGrad, // these are original bias gradients
-    //                    weightLayer.WeightGradCurve,
-    //                    weightLayer.BiasGradCurve,
-    //                    weightLayer.AvgWeightGrad,
-    //                    weightLayer.AvgBiasGrad,
-    //                    weightLayer.AvgWeightGradVar,
-    //                    weightLayer.AvgBiasGradVar,
-    //                    weightLayer.AvgWeightGradCurve,
-    //                    weightLayer.AvgBiasGradCurve,
-    //                    weightLayer.AvgWeightGradCurveVar,
-    //                    weightLayer.AvgBiasGradCurveVar,
-    //                    weightLayer.WeightMemorySize,
-    //                    weightLayer.BiasMemorySize,
-    //                    weightLayer.DropoutMask,
-    //                    weightLayer.Input.Count,
-    //                    weightLayer.Neurons
-    //                    );
-
-    //                // estimate learning rate
-    //                m_EstimateLearningRateKernel.SetupExecution(weightLayer.Neurons);
-    //                m_EstimateLearningRateKernel.Run(
-    //                    weightLayer.WeightLearningRate,
-    //                    weightLayer.BiasLearningRate,
-    //                    weightLayer.AvgWeightGrad,
-    //                    weightLayer.AvgBiasGrad,
-    //                    weightLayer.AvgWeightGradVar,
-    //                    weightLayer.AvgBiasGradVar,
-    //                    weightLayer.AvgWeightGradCurve,
-    //                    weightLayer.AvgBiasGradCurve,
-    //                    weightLayer.AvgWeightGradCurveVar,
-    //                    weightLayer.AvgBiasGradCurveVar,
-    //                    weightLayer.DropoutMask,
-    //                    weightLayer.Input.Count,
-    //                    weightLayer.Neurons
-    //                    );
-
-    //                // update memory size
-    //                m_UpdateMemoryKernel.SetupExecution(weightLayer.Neurons);
-    //                m_UpdateMemoryKernel.Run(
-    //                    weightLayer.AvgWeightGrad,
-    //                    weightLayer.AvgBiasGrad,
-    //                    weightLayer.AvgWeightGradVar,
-    //                    weightLayer.AvgBiasGradVar,
-    //                    weightLayer.WeightMemorySize,
-    //                    weightLayer.BiasMemorySize,
-    //                    weightLayer.DropoutMask,
-    //                    weightLayer.Input.Count,
-    //                    weightLayer.Neurons
-    //                    );
-
-    //                // restore gradients
-    //                weightLayer.WeightsGrad.CopyFromMemoryBlock(weightLayer.OriginalWeightsGrad, 0, 0, weightLayer.Weights.Count);
-    //                weightLayer.BiasGrad.CopyFromMemoryBlock(weightLayer.OriginalBiasGrad, 0, 0, weightLayer.Bias.Count);
-
-    //                // restore parameters
-    //                weightLayer.Weights.CopyFromMemoryBlock(weightLayer.OriginalWeights, 0, 0, weightLayer.Weights.Count);
-    //                weightLayer.Bias.CopyFromMemoryBlock(weightLayer.OriginalBias, 0, 0, weightLayer.Bias.Count);
-
-    //                // restore deltas
-    //                weightLayer.Delta.CopyFromMemoryBlock(weightLayer.OriginalDelta, 0, 0, weightLayer.Delta.Count);
-
-    //                // update parameters
-    //                if (SimulationStep > 1000)
-    //                {
-    //                    m_UpdateParametersKernel.SetupExecution(weightLayer.Neurons);
-    //                    m_UpdateMemoryKernel.Run(
-    //                        weightLayer.Weights,
-    //                        weightLayer.Bias,
-    //                        weightLayer.WeightLearningRate,
-    //                        weightLayer.BiasLearningRate,
-    //                        weightLayer.WeightsGrad,
-    //                        weightLayer.BiasGrad,
-    //                        weightLayer.DropoutMask,
-    //                        weightLayer.Input.Count,
-    //                        weightLayer.Neurons
-    //                        );
-    //                }
-    //            }
-    //            layer = layer.PreviousLayer;
-    //        }
-    //    }
-
-    //    private void GetGradients(MyAbstractWeightLayer layer)
-    //    {
-    //        m_ComputeGradientsKernel.SetupExecution(layer.Neurons);
-    //        m_ComputeGradientsKernel.Run(
-    //            layer.Input,
-    //            layer.Delta,
-    //            layer.Weights,
-    //            Owner.L1,
-    //            Owner.L2,
-    //            layer.DropoutMask,
-    //            layer.WeightsGrad,
-    //            layer.BiasGrad,
-    //            layer.Input.Count,
-    //            layer.Neurons
-    //            );
-    //    }
-    //}
 
     /// <author>GoodAI</author>
     /// <meta>ph</meta>
@@ -534,7 +600,7 @@ namespace GoodAI.Modules.NeuralNetwork.Group
                 }
 
                 // loop through the layers
-                MyAbstractLayer layer = Owner.FirstLayer;
+                MyAbstractLayer layer = Owner.FirstTopologicalLayer;
                 while (layer != null)
                 {
                     // check for weights
@@ -610,7 +676,7 @@ namespace GoodAI.Modules.NeuralNetwork.Group
                             break; // continue to next sample
                         }
                     }
-                    layer = layer.NextLayer;
+                    layer = layer.NextTopologicalLayer;
 
                     // catch unmatched dice-rolls
                     if (layer == null)
@@ -703,4 +769,5 @@ namespace GoodAI.Modules.NeuralNetwork.Group
         //    Owner.MaxRelativeDeltaDiffFloat.SafeCopyToDevice();
         //}
     }
+
 }

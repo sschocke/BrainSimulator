@@ -1,11 +1,8 @@
 ﻿using GoodAI.Core.Nodes;
 using GoodAI.Core.Task;
 using GoodAI.Core.Utils;
-using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace GoodAI.Core.Execution
 {
@@ -18,7 +15,8 @@ namespace GoodAI.Core.Execution
 
     public interface IMyExecutionPlanner
     {
-        MyExecutionPlan CreateExecutionPlan(MyProject project);        
+        MyExecutionPlan CreateExecutionPlan(MyProject project, IEnumerable<MyWorkingNode> initNodes = null);
+        MyExecutionBlock CreateNodeExecutionPlan(MyWorkingNode node, bool initPhase);
     }
 
     public interface IMyCustomExecutionPlanner
@@ -36,16 +34,24 @@ namespace GoodAI.Core.Execution
             PlanSignalTasks = true;
         }
 
-        public MyExecutionPlan CreateExecutionPlan(MyProject project)
+        /// <summary>
+        /// Creates the execution plan.
+        /// </summary>
+        /// <param name="project">The whole project from which the standard execution plan will be built.</param>
+        /// <param name="initNodes">Ordered list of new nodes from which the initialization plan will be built.</param>
+        /// <returns>The created execution plan.</returns>
+        public MyExecutionPlan CreateExecutionPlan(MyProject project, IEnumerable<MyWorkingNode> initNodes = null)
         {
             MyExecutionPlan executionPlan = new MyExecutionPlan();            
 
             IMyOrderingAlgorithm ordering = new MyHierarchicalOrdering();
             ordering.EvaluateOrder(project.Network);            
 
-            executionPlan.InitStepPlan = new MyExecutionBlock(
-                CreateNodeExecutionPlan(project.World, true), 
-                CreateNodeExecutionPlan(project.Network, true));
+            var initBlocks = new List<IMyExecutable>();
+            if (initNodes != null)
+                initBlocks.AddRange(initNodes.Select(node => CreateNodeExecutionPlan(node, true)));
+
+            executionPlan.InitStepPlan = new MyExecutionBlock(initBlocks.ToArray());
             executionPlan.InitStepPlan.Name = "Initialization";
 
             executionPlan.StandardStepPlan = new MyExecutionBlock(
@@ -56,7 +62,7 @@ namespace GoodAI.Core.Execution
             return executionPlan;
         }
 
-        private MyExecutionBlock CreateNodeExecutionPlan(MyWorkingNode node, bool initPhase)
+        public MyExecutionBlock CreateNodeExecutionPlan(MyWorkingNode node, bool initPhase)
         {
             List<IMyExecutable> defaultPlanContent = new List<IMyExecutable>();
 
@@ -69,21 +75,23 @@ namespace GoodAI.Core.Execution
             {
                 MyTask task = node.GetTaskByPropertyName(taskName);
 
-                if (task != null && initPhase && task.OneShot || !initPhase && !task.OneShot)
+                if (task != null && !task.DesignTime && (initPhase && task.OneShot || !initPhase && !task.OneShot))
                 {
                     defaultPlanContent.Add(task);
                 }
             }
 
-            if (node is MyNodeGroup)
+            MyNodeGroup nodeGroup = node as MyNodeGroup;
+            if (nodeGroup != null)
             {
-                IEnumerable<MyNode> children = (node as MyNodeGroup).Children.OrderBy(x => x.TopologicalOrder);
+                IEnumerable<MyNode> children = nodeGroup.Children.OrderBy(x => x.TopologicalOrder);
 
                 foreach (MyNode childNode in children)
                 {
-                    if (childNode is MyWorkingNode)
+                    MyWorkingNode childWorkingNode = childNode as MyWorkingNode;
+                    if (childWorkingNode != null)
                     {
-                        defaultPlanContent.Add(CreateNodeExecutionPlan(childNode as MyWorkingNode, initPhase));
+                        defaultPlanContent.Add(CreateNodeExecutionPlan(childWorkingNode, initPhase));
                     }
                 }
             }
@@ -98,23 +106,30 @@ namespace GoodAI.Core.Execution
 
             MyExecutionBlock resultPlan = defaultPlan;
 
-            if (node is IMyCustomExecutionPlanner)
+            IMyCustomExecutionPlanner executionPlannerNode = node as IMyCustomExecutionPlanner;
+            if (executionPlannerNode != null)
             {
                 if (initPhase)
                 {
-                    resultPlan = (node as IMyCustomExecutionPlanner).CreateCustomInitPhasePlan(defaultPlan);
+                    resultPlan = executionPlannerNode.CreateCustomInitPhasePlan(defaultPlan);
                 }
                 else
                 {
-                    resultPlan = (node as IMyCustomExecutionPlanner).CreateCustomExecutionPlan(defaultPlan);
+                    resultPlan = executionPlannerNode.CreateCustomExecutionPlan(defaultPlan);
                 }
                 resultPlan.Name = defaultPlan.Name;
             }
+
+            if (resultPlan.Name == null)
+                resultPlan.Name = node.GetType().Name;
 
             if (node is MyNodeGroup)
             {
                 resultPlan.Name += " (group)";
             }
+
+            // TODO(HonzaS): Rethink this. It's only used in profiling results.
+            node.ExecutionBlock = resultPlan;
 
             return resultPlan;
         }
